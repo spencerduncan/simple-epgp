@@ -37,6 +37,90 @@ local REFRESH_COOLDOWN = 10
 local syncedFromOfficer = false
 local initialSyncDone = false  -- true after we've done the one-time auto-request
 
+--------------------------------------------------------------------------------
+-- External Players — SavedVariables-backed storage for pugs/allies/cross-realm
+--------------------------------------------------------------------------------
+
+--- Add an external player to the SavedVariables DB.
+-- @param name Player name (will be normalized).
+-- @param class WoW class token (e.g. "WARRIOR"). Must be a valid RAID_CLASS_COLORS key.
+-- @return true on success, false with error message on failure.
+function EPGP:AddExternalPlayer(name, class)
+    if not name or name == "" then
+        SimpleEPGP:Print("Cannot add external player: name is required.")
+        return false
+    end
+    if not class or class == "" then
+        SimpleEPGP:Print("Cannot add external player: class is required.")
+        return false
+    end
+
+    local normalized = NormalizeName(name)
+    local db = SimpleEPGP.db
+    if not db then return false end
+
+    if db.profile.external_players[normalized] then
+        SimpleEPGP:Print(normalized .. " is already in the external player list.")
+        return false
+    end
+
+    db.profile.external_players[normalized] = {
+        class = class:upper(),
+        ep = 0,
+        gp = 0,
+        modified_by = UnitName("player"),
+        modified_at = time(),
+    }
+
+    -- Rebuild standings to include the new external player
+    self:GUILD_ROSTER_UPDATE()
+    return true
+end
+
+--- Remove an external player from the SavedVariables DB.
+-- @param name Player name (will be normalized).
+-- @return true on success, false if not found.
+function EPGP:RemoveExternalPlayer(name)
+    if not name or name == "" then
+        SimpleEPGP:Print("Cannot remove external player: name is required.")
+        return false
+    end
+
+    local normalized = NormalizeName(name)
+    local db = SimpleEPGP.db
+    if not db then return false end
+
+    if not db.profile.external_players[normalized] then
+        SimpleEPGP:Print(normalized .. " is not in the external player list.")
+        return false
+    end
+
+    db.profile.external_players[normalized] = nil
+
+    -- Rebuild standings to remove the external player
+    self:GUILD_ROSTER_UPDATE()
+    return true
+end
+
+--- Return the external_players table from SavedVariables.
+-- @return table The external_players table (may be empty).
+function EPGP:GetExternalPlayers()
+    local db = SimpleEPGP.db
+    if not db then return {} end
+    return db.profile.external_players or {}
+end
+
+--- Check if a player name is in the external player DB.
+-- @param name Player name (will be normalized).
+-- @return true if the name exists in external_players, false otherwise.
+function EPGP:IsExternalPlayer(name)
+    if not name then return false end
+    local normalized = NormalizeName(name)
+    local db = SimpleEPGP.db
+    if not db then return false end
+    return db.profile.external_players[normalized] ~= nil
+end
+
 function EPGP:OnEnable()
     if not IsInGuild() then return end
     self:RegisterEvent("GUILD_ROSTER_UPDATE")
@@ -118,6 +202,33 @@ function EPGP:GUILD_ROSTER_UPDATE()
         end
     end
 
+    -- Merge external players into standings
+    local externalPlayers = db.profile.external_players or {}
+    for extName, extData in pairs(externalPlayers) do
+        -- Skip if an external player name collides with a guild member
+        if not newLookup[extName] then
+            local ep = extData.ep or 0
+            local gp = extData.gp or 0
+            local effectiveGP = math.max(gp, 0) + baseGP
+            local pr = 0
+            if ep >= minEP and effectiveGP > 0 then
+                pr = ep / effectiveGP
+            end
+
+            local entry = {
+                name = extName,
+                class = extData.class,
+                ep = ep,
+                gp = gp,
+                pr = pr,
+                isExternal = true,
+                -- External players do NOT have rosterIndex
+            }
+            newStandings[#newStandings + 1] = entry
+            newLookup[extName] = entry
+        end
+    end
+
     -- Sort by PR descending
     table.sort(newStandings, function(a, b)
         return a.pr > b.pr
@@ -194,6 +305,7 @@ local function FindRosterIndex(name)
 end
 
 --- Modify a player's EP by a given amount.
+-- Checks guild roster first, then falls back to external player DB.
 -- @param name Player name.
 -- @param amount EP to add (can be negative for penalties).
 -- @param reason Optional reason string for the log.
@@ -208,7 +320,28 @@ function EPGP:ModifyEP(name, amount, reason)
 
     local index = FindRosterIndex(name)
     if not index then
-        SimpleEPGP:Print("Player " .. name .. " not found in guild roster.")
+        -- Not in guild roster — check external player DB
+        local normalized = NormalizeName(name)
+        local db = SimpleEPGP.db
+        local extPlayer = db and db.profile.external_players[normalized]
+        if extPlayer then
+            local ep = (extPlayer.ep or 0) + amount
+            if ep < 0 then ep = 0 end
+            extPlayer.ep = ep
+            extPlayer.modified_by = UnitName("player")
+            extPlayer.modified_at = time()
+
+            local Log = SimpleEPGP:GetModule("Log", true)
+            if Log then
+                Log:Add("EP", normalized, amount, nil, reason)
+            end
+
+            self:GUILD_ROSTER_UPDATE()
+            self:BroadcastStandings()
+            return true
+        end
+
+        SimpleEPGP:Print("Player " .. name .. " not found in guild roster or external player list.")
         return false
     end
 
@@ -235,6 +368,7 @@ function EPGP:ModifyEP(name, amount, reason)
 end
 
 --- Modify a player's GP by a given amount.
+-- Checks guild roster first, then falls back to external player DB.
 -- @param name Player name.
 -- @param amount GP to add (can be negative).
 -- @param reason Optional reason string for the log.
@@ -249,7 +383,28 @@ function EPGP:ModifyGP(name, amount, reason)
 
     local index = FindRosterIndex(name)
     if not index then
-        SimpleEPGP:Print("Player " .. name .. " not found in guild roster.")
+        -- Not in guild roster — check external player DB
+        local normalized = NormalizeName(name)
+        local db = SimpleEPGP.db
+        local extPlayer = db and db.profile.external_players[normalized]
+        if extPlayer then
+            local gp = (extPlayer.gp or 0) + amount
+            if gp < 0 then gp = 0 end
+            extPlayer.gp = gp
+            extPlayer.modified_by = UnitName("player")
+            extPlayer.modified_at = time()
+
+            local Log = SimpleEPGP:GetModule("Log", true)
+            if Log then
+                Log:Add("GP", normalized, amount, nil, reason)
+            end
+
+            self:GUILD_ROSTER_UPDATE()
+            self:BroadcastStandings()
+            return true
+        end
+
+        SimpleEPGP:Print("Player " .. name .. " not found in guild roster or external player list.")
         return false
     end
 
