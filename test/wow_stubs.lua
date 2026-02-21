@@ -62,6 +62,10 @@ function CreateFrame(frameType, name, parent, template)
                 SetTexCoord = function() end,
                 SetPoint = function() end,
                 SetSize = function() end,
+                SetHeight = function() end,
+                SetWidth = function() end,
+                SetAllPoints = function() end,
+                SetColorTexture = function() end,
             }
         end,
         -- Parent
@@ -88,6 +92,7 @@ function CreateFrame(frameType, name, parent, template)
         SetEnabled = function() end,
         Enable = function() end,
         Disable = function() end,
+        GetFontString = function(self) return self end,
         -- Slider
         SetMinMaxValues = function() end,
         SetValue = function() end,
@@ -95,6 +100,15 @@ function CreateFrame(frameType, name, parent, template)
         SetValueStep = function() end,
         SetOrientation = function() end,
         SetObeyStepOnDrag = function() end,
+        SetThumbTexture = function() end,
+        -- CheckButton
+        SetChecked = function(self, val) self._checked = val end,
+        IsChecked = function(self) return self._checked or false end,
+        -- Mouse wheel
+        EnableMouseWheel = function() end,
+        -- Dragging
+        StartMoving = function() end,
+        StopMovingOrSizing = function() end,
     }
     if name then
         _G[name] = frame
@@ -118,6 +132,7 @@ _G.GameTooltip.ClearLines = function() end
 _G.GameFontNormal = {}
 _G.GameFontHighlight = {}
 _G.GameFontHighlightSmall = {}
+_G.GameFontNormalSmall = {}
 _G.GameFontNormalLarge = {}
 _G.NumberFontNormal = {}
 _G.ChatFontNormal = {}
@@ -619,6 +634,7 @@ _G.DEFAULT_CHAT_FRAME.AddMessage = function() end
 
 _G.SlashCmdList = {}
 _G.hash_SlashCmdList = {}
+_G.UISpecialFrames = {}
 
 _G.NORMAL_FONT_COLOR = { r = 1.0, g = 0.82, b = 0 }
 _G.HIGHLIGHT_FONT_COLOR = { r = 1.0, g = 1.0, b = 1.0 }
@@ -644,6 +660,16 @@ _G.rawset = rawset
 _G.next = next
 _G.assert = assert
 _G.loadstring = loadstring or load
+
+-----------------------------------------------------------------------
+-- C_Item stub (TBC Anniversary)
+-----------------------------------------------------------------------
+
+_G.C_Item = {
+    RequestLoadItemDataByID = function(itemID)
+        -- No-op in tests; in real WoW this triggers GET_ITEM_INFO_RECEIVED
+    end,
+}
 
 -----------------------------------------------------------------------
 -- C_AddOns stub (TBC Anniversary)
