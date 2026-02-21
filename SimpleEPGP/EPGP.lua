@@ -20,6 +20,13 @@ local GetRaidRosterInfo = GetRaidRosterInfo
 local time = time
 local C_Timer = C_Timer
 
+--- Normalize a player name to WoW canonical casing (first letter upper, rest lower).
+-- Allows slash commands to be case-insensitive: "FLAUTAH", "flautah", "Flautah" all match.
+local function NormalizeName(name)
+    if not name then return name end
+    return name:sub(1, 1):upper() .. name:sub(2):lower()
+end
+
 -- Cached standings table, rebuilt on GUILD_ROSTER_UPDATE
 local standings = {}
 -- Lookup table: name -> standings entry
@@ -165,7 +172,7 @@ end
 -- @param name Player name (without realm).
 -- @return Standings entry table, or nil if not found.
 function EPGP:GetPlayerInfo(name)
-    return playerLookup[name]
+    return playerLookup[NormalizeName(name)]
 end
 
 --- Find a player's current roster index by name.
@@ -173,12 +180,13 @@ end
 -- @param name Player name (without realm).
 -- @return Roster index, or nil if not found.
 local function FindRosterIndex(name)
+    local normalized = NormalizeName(name)
     local numMembers = GetNumGuildMembers()
     for i = 1, numMembers do
         local rosterName = GetGuildRosterInfo(i)
         if rosterName then
             local shortName = rosterName:match("^([^%-]+)") or rosterName
-            if shortName == name then
+            if shortName == normalized then
                 return i
             end
         end
@@ -195,13 +203,13 @@ function EPGP:ModifyEP(name, amount, reason)
     if Debug then Debug:Log("EPGP", "ModifyEP", { player = name, amount = amount, reason = reason }) end
 
     if not self:CanEditNotes() then
-        self:Print("Cannot modify EP: you don't have officer note permissions.")
+        SimpleEPGP:Print("Cannot modify EP: you don't have officer note permissions.")
         return false
     end
 
     local index = FindRosterIndex(name)
     if not index then
-        self:Print("Player " .. name .. " not found in guild roster.")
+        SimpleEPGP:Print("Player " .. name .. " not found in guild roster.")
         return false
     end
 
@@ -236,13 +244,13 @@ function EPGP:ModifyGP(name, amount, reason)
     if Debug then Debug:Log("EPGP", "ModifyGP", { player = name, amount = amount, reason = reason }) end
 
     if not self:CanEditNotes() then
-        self:Print("Cannot modify GP: you don't have officer note permissions.")
+        SimpleEPGP:Print("Cannot modify GP: you don't have officer note permissions.")
         return false
     end
 
     local index = FindRosterIndex(name)
     if not index then
-        self:Print("Player " .. name .. " not found in guild roster.")
+        SimpleEPGP:Print("Player " .. name .. " not found in guild roster.")
         return false
     end
 
@@ -275,12 +283,12 @@ function EPGP:MassEP(amount, reason)
     if Debug then Debug:Log("EPGP", "MassEP", { amount = amount, reason = reason }) end
 
     if not self:CanEditNotes() then
-        self:Print("Cannot award mass EP: you don't have officer note permissions.")
+        SimpleEPGP:Print("Cannot award mass EP: you don't have officer note permissions.")
         return false
     end
 
     if not IsInRaid() then
-        self:Print("You must be in a raid to award mass EP.")
+        SimpleEPGP:Print("You must be in a raid to award mass EP.")
         return false
     end
 
@@ -331,7 +339,7 @@ function EPGP:MassEP(amount, reason)
 
     self:RefreshRoster()
     self:BroadcastStandings()
-    self:Print("Awarded " .. amount .. " EP to " .. awarded .. " raid members.")
+    SimpleEPGP:Print("Awarded " .. amount .. " EP to " .. awarded .. " raid members.")
     return true
 end
 
@@ -342,14 +350,14 @@ function EPGP:Decay()
     if Debug then Debug:Log("EPGP", "Decay", { percent = SimpleEPGP.db.profile.decay_percent }) end
 
     if not self:CanEditNotes() then
-        self:Print("Cannot decay: you don't have officer note permissions.")
+        SimpleEPGP:Print("Cannot decay: you don't have officer note permissions.")
         return false
     end
 
     local db = SimpleEPGP.db
     local decayPercent = db.profile.decay_percent or 0
     if decayPercent <= 0 then
-        self:Print("Decay percent is 0, nothing to do.")
+        SimpleEPGP:Print("Decay percent is 0, nothing to do.")
         return false
     end
 
@@ -394,7 +402,7 @@ function EPGP:Decay()
         EPGP:BroadcastStandings()
     end)
 
-    self:Print("Applied " .. decayPercent .. "% decay to all members.")
+    SimpleEPGP:Print("Applied " .. decayPercent .. "% decay to all members.")
     return true
 end
 
@@ -404,7 +412,7 @@ function EPGP:ResetAll()
     if Debug then Debug:Log("EPGP", "ResetAll") end
 
     if not self:CanEditNotes() then
-        self:Print("Cannot reset: you don't have officer note permissions.")
+        SimpleEPGP:Print("Cannot reset: you don't have officer note permissions.")
         return false
     end
 
@@ -442,7 +450,7 @@ function EPGP:ResetAll()
         EPGP:BroadcastStandings()
     end)
 
-    self:Print("All EP/GP values have been reset.")
+    SimpleEPGP:Print("All EP/GP values have been reset.")
     return true
 end
 

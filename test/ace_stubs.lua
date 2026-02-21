@@ -342,11 +342,6 @@ function AceAddon:NewAddon(name, ...)
     addon.OnInitialize = addon.OnInitialize or function() end
     addon.OnEnable = addon.OnEnable or function() end
 
-    -- Print (always available, AceConsole overrides if mixed in)
-    if not addon.Print then
-        addon.Print = function(self, ...) end
-    end
-
     addon.GetModule = function(self, modName, silent)
         local mod = self.modules[modName]
         if not mod and not silent then
@@ -368,18 +363,6 @@ function AceAddon:NewAddon(name, ...)
         mod.OnInitialize = mod.OnInitialize or function() end
         mod.OnEnable = mod.OnEnable or function() end
         mod.OnDisable = mod.OnDisable or function() end
-
-        -- Print (always available)
-        if not mod.Print then
-            mod.Print = function(self2, ...)
-                local parts = {}
-                for i2 = 1, select("#", ...) do
-                    parts[i2] = tostring(select(i2, ...))
-                end
-                self2._printLog = self2._printLog or {}
-                table.insert(self2._printLog, table.concat(parts, " "))
-            end
-        end
 
         self.modules[modName] = mod
         self.orderedModules[#self.orderedModules + 1] = mod
