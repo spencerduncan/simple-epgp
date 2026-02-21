@@ -2,7 +2,6 @@ local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local EPGP = SimpleEPGP:NewModule("EPGP", "AceEvent-3.0")
 
 local floor = math.floor
-local pairs = pairs
 local tonumber = tonumber
 local tostring = tostring
 local GetNumGuildMembers = GetNumGuildMembers
@@ -319,7 +318,7 @@ function EPGP:MassEP(amount, reason)
     if standbyPercent > 0 and db.standby then
         local standbyAmount = floor(amount * standbyPercent)
         if standbyAmount > 0 then
-            for _, standbyName in pairs(db.standby) do
+            for _, standbyName in ipairs(db.standby) do
                 local index = FindRosterIndex(standbyName)
                 if index then
                     local _, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(index)
@@ -542,7 +541,7 @@ function EPGP:CheckNeedSync()
 
     -- Check if all standings are zero (meaning notes are unreadable)
     local allZero = true
-    for _, entry in pairs(standings) do
+    for _, entry in ipairs(standings) do
         if entry.ep > 0 or entry.gp > 0 then
             allZero = false
             break

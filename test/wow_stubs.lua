@@ -83,7 +83,9 @@ function CreateFrame(frameType, name, parent, template)
         SetMaxLetters = function() end,
         SetAutoFocus = function() end,
         SetFocus = function() end,
+        ClearFocus = function() end,
         HighlightText = function() end,
+        SetNumeric = function() end,
         -- Button
         SetNormalTexture = function() end,
         SetHighlightTexture = function() end,
@@ -93,6 +95,8 @@ function CreateFrame(frameType, name, parent, template)
         Enable = function() end,
         Disable = function() end,
         GetFontString = function(self) return self end,
+        SetNormalFontObject = function() end,
+        SetFontObject = function() end,
         -- Slider
         SetMinMaxValues = function() end,
         SetValue = function() end,

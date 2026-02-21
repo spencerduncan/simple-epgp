@@ -321,6 +321,133 @@ describe("Core", function()
             end)
         end)
 
+        describe("/sepgp loot", function()
+            local LootMaster
+
+            before_each(function()
+                LootMaster = SimpleEPGP:GetModule("LootMaster")
+                -- Reset loot sessions
+                LootMaster.sessions = {}
+                LootMaster.nextSessionId = 1
+                -- Clear any pending loot state
+                SimpleEPGP._pendingLootItemID = nil
+                SimpleEPGP._pendingLootItemLink = nil
+            end)
+
+            it("starts a loot session from an item link", function()
+                local link = _G._testItemDB[29759][2]
+                SimpleEPGP:HandleSlashCommand("loot " .. link)
+                -- Session should have been created
+                assert.is_not_nil(LootMaster.sessions[1])
+                assert.are.equal(link, LootMaster.sessions[1].itemLink)
+            end)
+
+            it("starts a loot session from an item ID", function()
+                SimpleEPGP:HandleSlashCommand("loot 29759")
+                -- Session should have been created
+                assert.is_not_nil(LootMaster.sessions[1])
+                -- The item link should be resolved from the ID
+                local expectedLink = _G._testItemDB[29759][2]
+                assert.are.equal(expectedLink, LootMaster.sessions[1].itemLink)
+            end)
+
+            it("calculates GP cost correctly for the session", function()
+                local GPCalc = SimpleEPGP:GetModule("GPCalc")
+                local link = _G._testItemDB[29759][2]
+                local expectedGP = GPCalc:CalculateGP(link)
+                SimpleEPGP:HandleSlashCommand("loot " .. link)
+                assert.are.equal(expectedGP, LootMaster.sessions[1].gpCost)
+            end)
+
+            it("prints usage with no args", function()
+                SimpleEPGP:HandleSlashCommand("loot")
+                -- Should not create a session
+                assert.is_nil(LootMaster.sessions[1])
+            end)
+
+            it("prints usage with invalid arg", function()
+                SimpleEPGP:HandleSlashCommand("loot notanumber")
+                assert.is_nil(LootMaster.sessions[1])
+            end)
+
+            it("handles uncached items by setting pending state", function()
+                -- Item ID 99999 is not in _testItemDB, so GetItemInfo returns nil
+                SimpleEPGP:HandleSlashCommand("loot 99999")
+                -- Session should NOT have been created yet
+                assert.is_nil(LootMaster.sessions[1])
+                -- Pending state should be set (but C_Timer.After fires immediately
+                -- in tests, so the timeout will have already cleaned it up)
+                -- The timeout fires immediately in test stubs, clearing the pending state
+                -- So we just verify no crash occurred
+            end)
+
+            it("resolves pending session on GET_ITEM_INFO_RECEIVED", function()
+                -- Manually set up pending state (simulating the uncached flow
+                -- without relying on C_Timer.After timing)
+                SimpleEPGP._pendingLootItemID = 29759
+                SimpleEPGP._pendingLootItemLink = nil
+
+                -- Fire the event
+                SimpleEPGP:GET_ITEM_INFO_RECEIVED("GET_ITEM_INFO_RECEIVED", 29759)
+
+                -- Pending state should be cleared
+                assert.is_nil(SimpleEPGP._pendingLootItemID)
+                assert.is_nil(SimpleEPGP._pendingLootItemLink)
+
+                -- Session should have been created
+                assert.is_not_nil(LootMaster.sessions[1])
+                local expectedLink = _G._testItemDB[29759][2]
+                assert.are.equal(expectedLink, LootMaster.sessions[1].itemLink)
+            end)
+
+            it("ignores GET_ITEM_INFO_RECEIVED for wrong item ID", function()
+                SimpleEPGP._pendingLootItemID = 29759
+                SimpleEPGP._pendingLootItemLink = nil
+
+                -- Fire event for a different item
+                SimpleEPGP:GET_ITEM_INFO_RECEIVED("GET_ITEM_INFO_RECEIVED", 12345)
+
+                -- Pending state should still be set
+                assert.are.equal(29759, SimpleEPGP._pendingLootItemID)
+                -- No session created
+                assert.is_nil(LootMaster.sessions[1])
+
+                -- Clean up
+                SimpleEPGP._pendingLootItemID = nil
+            end)
+
+            it("ignores GET_ITEM_INFO_RECEIVED when no pending item", function()
+                -- Should not error
+                SimpleEPGP:GET_ITEM_INFO_RECEIVED("GET_ITEM_INFO_RECEIVED", 29759)
+                assert.is_nil(LootMaster.sessions[1])
+            end)
+
+            it("starts session with 0 GP for non-equippable items", function()
+                -- Add a non-equippable item to the test DB temporarily
+                _G._testItemDB[99990] = {
+                    "Pattern: Something", nil, 4, 120, 70,
+                    "Recipe", "Tailoring", 1, "", 123470, 0
+                }
+                -- Generate a fake link for it
+                _G._testItemDB[99990][2] = "|cffa335ee|Hitem:99990::::::::70:::::::|h[Pattern: Something]|h|r"
+
+                SimpleEPGP:HandleSlashCommand("loot 99990")
+                assert.is_not_nil(LootMaster.sessions[1])
+                assert.are.equal(0, LootMaster.sessions[1].gpCost)
+
+                -- Clean up
+                _G._testItemDB[99990] = nil
+            end)
+
+            it("increments session IDs across multiple loot commands", function()
+                local link = _G._testItemDB[29759][2]
+                SimpleEPGP:HandleSlashCommand("loot " .. link)
+                SimpleEPGP:HandleSlashCommand("loot " .. link)
+                assert.is_not_nil(LootMaster.sessions[1])
+                assert.is_not_nil(LootMaster.sessions[2])
+            end)
+        end)
+
         -- Note: /sepgp top, /sepgp board, /sepgp config, /sepgp gpconfig, /sepgp export,
         -- and /sepgp (no args) require UI modules which aren't loaded in
         -- this test. Those commands are tested via in-game manual testing.

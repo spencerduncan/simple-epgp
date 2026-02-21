@@ -33,3 +33,4 @@ UI\ExportFrame.lua
 UI\Tooltip.lua
 UI\Leaderboard.lua
 UI\StandbyManager.lua
+UI\OfficerPanel.lua

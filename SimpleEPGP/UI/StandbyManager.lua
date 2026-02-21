@@ -29,7 +29,10 @@ local scrollOffset = 0
 -- @return table Array of player name strings.
 local function GetStandbyList()
     if not SimpleEPGP.db then return {} end
-    return SimpleEPGP.db.standby or {}
+    if not SimpleEPGP.db.standby then
+        SimpleEPGP.db.standby = {}
+    end
+    return SimpleEPGP.db.standby
 end
 
 --- Add a name to the standby list (with duplicate check).

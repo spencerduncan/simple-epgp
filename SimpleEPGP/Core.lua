@@ -13,6 +13,7 @@ local tonumber = tonumber
 local table = table
 local SendChatMessage = SendChatMessage
 local IsInRaid = IsInRaid
+local GetItemInfo = GetItemInfo
 
 -- Pending confirmation state for dangerous commands (decay, reset)
 local pendingAction = nil
@@ -165,12 +166,16 @@ function SimpleEPGP:HandleSlashCommand(input)
         self:CmdLog(args)
     elseif cmd == "reset" then
         self:CmdReset()
+    elseif cmd == "officer" then
+        self:GetModule("OfficerPanel"):Toggle()
     elseif cmd == "board" or cmd == "leaderboard" then
         self:GetModule("Leaderboard"):Toggle()
     elseif cmd == "top" then
         self:CmdTop(args)
     elseif cmd == "standbyui" then
         self:GetModule("StandbyManager"):Toggle()
+    elseif cmd == "loot" then
+        self:CmdLoot(args, input)
     elseif cmd == "debug" then
         self:GetModule("Debug"):HandleCommand(args)
     elseif cmd == "help" then
@@ -353,6 +358,7 @@ function SimpleEPGP:CmdStandby(args)
         end
         self.db.standby[#self.db.standby + 1] = name
         self:Print(name .. " added to standby list.")
+        self:SendMessage("SEPGP_STANDBY_UPDATED")
 
     elseif sub == "remove" then
         if not name then
@@ -363,6 +369,7 @@ function SimpleEPGP:CmdStandby(args)
             if v == name then
                 table.remove(self.db.standby, i)
                 self:Print(name .. " removed from standby list.")
+                self:SendMessage("SEPGP_STANDBY_UPDATED")
                 return
             end
         end
@@ -372,6 +379,7 @@ function SimpleEPGP:CmdStandby(args)
         local count = #self.db.standby
         self.db.standby = {}
         self:Print("Standby list cleared (" .. count .. " names removed).")
+        self:SendMessage("SEPGP_STANDBY_UPDATED")
 
     elseif sub == "list" then
         local list = self.db.standby
@@ -485,13 +493,17 @@ function SimpleEPGP:CmdGPOverride(args)
 
     if sub == "list" then
         local overrides = GPCalc:GetAllItemOverrides()
-        local count = 0
-        for _ in pairs(overrides) do count = count + 1 end
-        if count == 0 then
+        local sortedIDs = {}
+        for id in pairs(overrides) do
+            sortedIDs[#sortedIDs + 1] = id
+        end
+        if #sortedIDs == 0 then
             self:Print("No item GP overrides set.")
         else
-            self:Print("Item GP overrides (" .. count .. "):")
-            for itemID, gpCost in pairs(overrides) do
+            table.sort(sortedIDs)
+            self:Print("Item GP overrides (" .. #sortedIDs .. "):")
+            for _, itemID in ipairs(sortedIDs) do
+                local gpCost = overrides[itemID]
                 local name = GetItemInfo(itemID)
                 local display = name or ("item:" .. itemID)
                 self:Print("  " .. display .. " = " .. gpCost .. " GP")
@@ -538,6 +550,108 @@ function SimpleEPGP:CmdGPOverride(args)
 end
 
 --------------------------------------------------------------------------------
+-- /sepgp loot <itemLink|itemID>
+--------------------------------------------------------------------------------
+
+--- Start a loot session from an item link or item ID.
+-- Handles uncached items by requesting item data and waiting for
+-- GET_ITEM_INFO_RECEIVED before starting the session.
+-- @param args table Parsed arguments
+-- @param input string Raw slash command input (needed to extract item links)
+function SimpleEPGP:CmdLoot(args, input)
+    -- Try to extract an item link from the raw input (links contain spaces)
+    local itemLink = input:match("|c.-|Hitem:.-|h|r")
+    local itemID
+
+    if itemLink then
+        itemID = tonumber(itemLink:match("item:(%d+)"))
+    else
+        -- Fall back to plain item ID from args
+        itemID = tonumber(args[2])
+        if not itemID then
+            self:Print("Usage: /sepgp loot <itemLink or itemID>")
+            self:Print("  Shift-click an item to insert its link, or use a numeric item ID.")
+            return
+        end
+    end
+
+    -- Try to get item info (may be nil for uncached items)
+    local itemName = GetItemInfo(itemLink or itemID)
+
+    if itemName then
+        -- Item is cached, start session immediately
+        self:StartLootSessionForItem(itemLink, itemID)
+    else
+        -- Item not cached — request data and wait for callback
+        self:Print("Item data not cached, requesting...")
+        self._pendingLootItemID = itemID
+        self._pendingLootItemLink = itemLink
+        if C_Item and C_Item.RequestLoadItemDataByID then
+            C_Item.RequestLoadItemDataByID(itemID)
+        end
+        self:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+
+        -- Timeout after 5 seconds to clean up if data never arrives
+        C_Timer.After(5, function()
+            if self._pendingLootItemID == itemID then
+                self._pendingLootItemID = nil
+                self._pendingLootItemLink = nil
+                self:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+                self:Print("Timed out waiting for item data. The item ID may be invalid.")
+            end
+        end)
+    end
+end
+
+--- Event handler for GET_ITEM_INFO_RECEIVED.
+-- Fires when the client receives item data from the server.
+-- @param _ string Event name (unused)
+-- @param receivedItemID number The item ID that was loaded
+function SimpleEPGP:GET_ITEM_INFO_RECEIVED(_, receivedItemID)
+    if not self._pendingLootItemID then return end
+    if tonumber(receivedItemID) ~= self._pendingLootItemID then return end
+
+    self:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+
+    local itemID = self._pendingLootItemID
+    local itemLink = self._pendingLootItemLink
+    self._pendingLootItemID = nil
+    self._pendingLootItemLink = nil
+
+    self:StartLootSessionForItem(itemLink, itemID)
+end
+
+--- Start a loot session for a resolved item.
+-- Called once we know the item data is cached and available.
+-- @param itemLink string|nil The item link (may be nil if started from ID)
+-- @param itemID number The item ID
+function SimpleEPGP:StartLootSessionForItem(itemLink, itemID)
+    local GPCalc = self:GetModule("GPCalc")
+    local LootMaster = self:GetModule("LootMaster")
+
+    -- Resolve item link if we only have an ID
+    if not itemLink then
+        local _, link = GetItemInfo(itemID)
+        itemLink = link
+    end
+
+    if not itemLink then
+        self:Print("Could not resolve item link for item ID " .. tostring(itemID) .. ".")
+        return
+    end
+
+    local gpCost = GPCalc:CalculateGP(itemLink)
+    if not gpCost then
+        -- Item may be below quality threshold or not equippable — use 0 GP
+        gpCost = 0
+        self:Print("Note: GP cost is 0 (item may be below quality threshold or not equippable).")
+    end
+
+    local sessionId = LootMaster:StartSession(itemLink, gpCost)
+    self:Print("Loot session #" .. sessionId .. " started for " .. itemLink .. " (GP: " .. gpCost .. ")")
+end
+
+--------------------------------------------------------------------------------
 -- Usage / Help
 --------------------------------------------------------------------------------
 
@@ -555,11 +669,13 @@ function SimpleEPGP:PrintUsage()
     self:Print("  /sepgp slot <INVTYPE_X> <value|reset> — Override slot multiplier")
     self:Print("  /sepgp gpoverride <itemID|link> <gp|clear> — Item GP override")
     self:Print("  /sepgp gpoverride list — List all item overrides")
+    self:Print("  /sepgp loot <itemLink|itemID> — Start a loot session from a bag item")
     self:Print("  /sepgp sync — Request standings from an online officer")
     self:Print("  /sepgp export — Open CSV export window")
     self:Print("  /sepgp log [N] — Show last N log entries")
     self:Print("  /sepgp reset — Reset all EP/GP (requires /sepgp confirm)")
     self:Print("  /sepgp standbyui — Open standby list manager")
+    self:Print("  /sepgp officer — Open officer EP/GP panel")
     self:Print("  /sepgp board — Open leaderboard")
     self:Print("  /sepgp top [N] — Announce top N to guild chat")
     self:Print("  /sepgp debug — Debug/testing commands (see /sepgp debug help)")
