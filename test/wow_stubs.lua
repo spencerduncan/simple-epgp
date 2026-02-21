@@ -67,6 +67,9 @@ function CreateFrame(frameType, name, parent, template)
                 SetWidth = function() end,
                 SetAllPoints = function() end,
                 SetColorTexture = function() end,
+                Show = function() end,
+                Hide = function() end,
+                SetAlpha = function() end,
             }
         end,
         -- Parent
