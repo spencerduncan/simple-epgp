@@ -2,22 +2,64 @@ local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local Leaderboard = SimpleEPGP:NewModule("Leaderboard", "AceEvent-3.0")
 
 local format = string.format
+local sort = table.sort
 local tinsert = table.insert
 local RAID_CLASS_COLORS = RAID_CLASS_COLORS
 local UnitName = UnitName
 local SendChatMessage = SendChatMessage
+local floor = math.floor
 
 -- UI state
 local frame = nil
-local rows = {}
+local displayRows = {}
+local groupHeaders = {}
 local activeFilter = "all"  -- "all", "raiders", "online"
+local activeGrouping = "none"  -- "none", "class", "role"
+local collapsedGroups = {}
+local scrollOffset = 0
 
 -- Constants
 local FRAME_WIDTH = 400
-local FRAME_HEIGHT = 450
+local FRAME_HEIGHT = 500
 local ROW_HEIGHT = 18
-local HEADER_HEIGHT = 60
+local GROUP_HEADER_HEIGHT = 22
+local CONTROLS_HEIGHT = 88  -- title + filter buttons + group buttons + column headers
 local MAX_VISIBLE_ROWS = 20
+
+-- Role mapping: class token -> primary role group
+local CLASS_ROLE = {
+    WARRIOR = "Tank",
+    PALADIN = "Healer",
+    DRUID   = "Healer",
+    PRIEST  = "Healer",
+    SHAMAN  = "Healer",
+    HUNTER  = "DPS",
+    ROGUE   = "DPS",
+    MAGE    = "DPS",
+    WARLOCK = "DPS",
+}
+
+-- Display name for class tokens
+local CLASS_DISPLAY = {
+    WARRIOR = "Warrior",
+    PALADIN = "Paladin",
+    HUNTER  = "Hunter",
+    ROGUE   = "Rogue",
+    PRIEST  = "Priest",
+    SHAMAN  = "Shaman",
+    MAGE    = "Mage",
+    WARLOCK = "Warlock",
+    DRUID   = "Druid",
+}
+
+-- Canonical ordering for role groups
+local ROLE_ORDER = { "Tank", "Healer", "DPS" }
+
+-- Canonical ordering for class groups (alphabetical)
+local CLASS_ORDER = {
+    "DRUID", "HUNTER", "MAGE", "PALADIN", "PRIEST",
+    "ROGUE", "SHAMAN", "WARLOCK", "WARRIOR",
+}
 
 --------------------------------------------------------------------------------
 -- Data
@@ -54,14 +96,107 @@ local function GetFilteredStandings(filter)
 end
 
 --------------------------------------------------------------------------------
+-- Grouping Logic
+--------------------------------------------------------------------------------
+
+--- Get the group key for a standings entry based on the active grouping mode.
+-- @param entry table Standings entry with name, class, ep, gp, pr fields
+-- @param grouping string "none", "class", or "role"
+-- @return string Group key, or nil for no grouping
+local function GetGroupKey(entry, grouping)
+    if grouping == "class" then
+        return entry.class or "UNKNOWN"
+    elseif grouping == "role" then
+        return CLASS_ROLE[entry.class] or "DPS"
+    end
+    return nil
+end
+
+--- Get the display name for a group key.
+-- @param key string Group key (class token or role name)
+-- @param grouping string "class" or "role"
+-- @return string Human-readable group name
+local function GetGroupDisplayName(key, grouping)
+    if grouping == "class" then
+        return CLASS_DISPLAY[key] or key
+    end
+    return key
+end
+
+--- Build the display items list: a flat array of group headers and player rows.
+-- Each item is either {type="header", key=string, displayName=string, count=number}
+-- or {type="row", entry=standingsEntry, rank=number}.
+-- When a group is collapsed, its player rows are omitted.
+-- @param standings array Filtered standings entries sorted by PR descending
+-- @param grouping string "none", "class", or "role"
+-- @param collapsed table Set of collapsed group keys
+-- @return array of display items
+local function BuildDisplayItems(standings, grouping, collapsed)
+    if grouping == "none" then
+        local items = {}
+        for i = 1, #standings do
+            items[#items + 1] = { type = "row", entry = standings[i], rank = i }
+        end
+        return items
+    end
+
+    -- Group entries
+    local groups = {}
+    local groupSet = {}
+    for i = 1, #standings do
+        local entry = standings[i]
+        local key = GetGroupKey(entry, grouping)
+        if not groupSet[key] then
+            groupSet[key] = {}
+            groups[#groups + 1] = key
+        end
+        tinsert(groupSet[key], entry)
+    end
+
+    -- Sort groups by canonical order
+    local orderMap = {}
+    if grouping == "class" then
+        for i, v in ipairs(CLASS_ORDER) do
+            orderMap[v] = i
+        end
+    elseif grouping == "role" then
+        for i, v in ipairs(ROLE_ORDER) do
+            orderMap[v] = i
+        end
+    end
+    sort(groups, function(a, b)
+        return (orderMap[a] or 999) < (orderMap[b] or 999)
+    end)
+
+    -- Build flat display list
+    local items = {}
+    for _, key in ipairs(groups) do
+        local members = groupSet[key]
+        local isCollapsed = collapsed[key] or false
+        items[#items + 1] = {
+            type = "header",
+            key = key,
+            displayName = GetGroupDisplayName(key, grouping),
+            count = #members,
+            collapsed = isCollapsed,
+        }
+        if not isCollapsed then
+            for rank, entry in ipairs(members) do
+                items[#items + 1] = { type = "row", entry = entry, rank = rank }
+            end
+        end
+    end
+
+    return items
+end
+
+--------------------------------------------------------------------------------
 -- Frame Creation (lazy)
 --------------------------------------------------------------------------------
 
-local function CreateRow(parent, index)
+local function CreateDataRow(parent)
     local row = CreateFrame("Frame", nil, parent)
     row:SetHeight(ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -(HEADER_HEIGHT + (index - 1) * ROW_HEIGHT))
-    row:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
 
     row.rank = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     row.rank:SetPoint("LEFT", row, "LEFT", 0, 0)
@@ -93,19 +228,73 @@ local function CreateRow(parent, index)
     row.highlight:SetColorTexture(1, 1, 1, 0.05)
     row.highlight:Hide()
 
+    row._itemType = "row"
     return row
 end
 
-local function CreateFilterButton(parent, label, filterKey, xOffset)
+local function CreateGroupHeader(parent)
+    local header = CreateFrame("Button", nil, parent)
+    header:SetHeight(GROUP_HEADER_HEIGHT)
+
+    header.arrow = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    header.arrow:SetPoint("LEFT", header, "LEFT", 4, 0)
+    header.arrow:SetWidth(16)
+    header.arrow:SetJustifyH("LEFT")
+
+    header.label = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    header.label:SetPoint("LEFT", header, "LEFT", 20, 0)
+    header.label:SetJustifyH("LEFT")
+
+    header.countText = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    header.countText:SetPoint("RIGHT", header, "RIGHT", -8, 0)
+    header.countText:SetJustifyH("RIGHT")
+
+    -- Separator line below header
+    header.sep = header:CreateTexture(nil, "ARTWORK")
+    header.sep:SetPoint("BOTTOMLEFT", header, "BOTTOMLEFT", 0, 0)
+    header.sep:SetPoint("BOTTOMRIGHT", header, "BOTTOMRIGHT", 0, 0)
+    header.sep:SetHeight(1)
+    header.sep:SetColorTexture(0.5, 0.5, 0.5, 0.3)
+
+    -- Highlight on hover
+    header.hoverBg = header:CreateTexture(nil, "HIGHLIGHT")
+    header.hoverBg:SetAllPoints()
+    header.hoverBg:SetColorTexture(1, 1, 1, 0.05)
+
+    header._itemType = "header"
+    return header
+end
+
+local function CreateFilterButton(parent, label, filterKey, xOffset, yOffset)
     local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     btn:SetSize(90, 22)
-    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", xOffset, -30)
+    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", xOffset, yOffset)
     btn:SetText(label)
     btn:SetScript("OnClick", function()
         activeFilter = filterKey
+        scrollOffset = 0
         Leaderboard:Refresh()
     end)
     return btn
+end
+
+local function CreateGroupButton(parent, label, groupKey, xOffset, yOffset)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(90, 22)
+    btn:SetPoint("TOPLEFT", parent, "TOPLEFT", xOffset, yOffset)
+    btn:SetText(label)
+    btn:SetScript("OnClick", function()
+        activeGrouping = groupKey
+        collapsedGroups = {}
+        scrollOffset = 0
+        Leaderboard:Refresh()
+    end)
+    return btn
+end
+
+local function OnScrollChanged(_, value)
+    scrollOffset = floor(value)
+    Leaderboard:Refresh()
 end
 
 local function CreateLeaderboardFrame()
@@ -135,13 +324,18 @@ local function CreateLeaderboardFrame()
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
 
-    -- Filter buttons
-    f.btnAll = CreateFilterButton(f, "All Members", "all", 12)
-    f.btnRaiders = CreateFilterButton(f, "Raiders Only", "raiders", 108)
-    f.btnOnline = CreateFilterButton(f, "Online Only", "online", 204)
+    -- Filter buttons (row 1)
+    f.btnAll = CreateFilterButton(f, "All Members", "all", 12, -30)
+    f.btnRaiders = CreateFilterButton(f, "Raiders Only", "raiders", 108, -30)
+    f.btnOnline = CreateFilterButton(f, "Online Only", "online", 204, -30)
+
+    -- Group buttons (row 2)
+    f.btnGroupNone = CreateGroupButton(f, "No Groups", "none", 12, -54)
+    f.btnGroupClass = CreateGroupButton(f, "By Class", "class", 108, -54)
+    f.btnGroupRole = CreateGroupButton(f, "By Role", "role", 204, -54)
 
     -- Column headers
-    local headerY = -(HEADER_HEIGHT - 4)
+    local headerY = -(CONTROLS_HEIGHT - 4)
     local headerFont = "GameFontNormalSmall"
 
     local hRank = f:CreateFontString(nil, "OVERLAY", headerFont)
@@ -177,10 +371,45 @@ local function CreateLeaderboardFrame()
     hPR:SetText("PR")
     hPR:SetTextColor(0.8, 0.8, 0.0)
 
-    -- Create row frames
+    -- Create row and header frame pools
     for i = 1, MAX_VISIBLE_ROWS do
-        rows[i] = CreateRow(f, i)
+        local row = CreateDataRow(f)
+        displayRows[i] = row
     end
+    for i = 1, 10 do
+        local header = CreateGroupHeader(f)
+        groupHeaders[i] = header
+    end
+
+    -- Scroll bar (plain Slider, same pattern as Standings.lua)
+    local scrollBar = CreateFrame("Slider", "SimpleEPGPLeaderboardScrollBar", f)
+    scrollBar:SetPoint("TOPRIGHT", -10, -(CONTROLS_HEIGHT + 4))
+    scrollBar:SetPoint("BOTTOMRIGHT", -10, 12)
+    scrollBar:SetWidth(12)
+    scrollBar:SetOrientation("VERTICAL")
+    scrollBar:SetMinMaxValues(0, 1)
+    scrollBar:SetValueStep(1)
+    scrollBar:SetObeyStepOnDrag(true)
+    scrollBar:SetValue(0)
+
+    local track = scrollBar:CreateTexture(nil, "BACKGROUND")
+    track:SetAllPoints()
+    track:SetColorTexture(0.1, 0.1, 0.1, 0.3)
+
+    local thumb = scrollBar:CreateTexture(nil, "OVERLAY")
+    thumb:SetSize(12, 40)
+    thumb:SetColorTexture(0.5, 0.5, 0.5, 0.6)
+    scrollBar:SetThumbTexture(thumb)
+
+    scrollBar:SetScript("OnValueChanged", OnScrollChanged)
+    f.scrollBar = scrollBar
+
+    -- Mouse wheel scrolling
+    f:EnableMouseWheel(true)
+    f:SetScript("OnMouseWheel", function(_, delta)
+        local current = scrollBar:GetValue()
+        scrollBar:SetValue(current - delta * 3)
+    end)
 
     -- Escape-to-close
     tinsert(UISpecialFrames, "SimpleEPGPLeaderboard")
@@ -198,26 +427,113 @@ function Leaderboard:Refresh()
 
     local standings = GetFilteredStandings(activeFilter)
     local playerName = UnitName("player")
+    local items = BuildDisplayItems(standings, activeGrouping, collapsedGroups)
 
+    -- Update scroll bar range
+    local maxScroll = math.max(0, #items - MAX_VISIBLE_ROWS)
+    frame.scrollBar:SetMinMaxValues(0, maxScroll)
+    if scrollOffset > maxScroll then
+        scrollOffset = maxScroll
+        frame.scrollBar:SetValue(scrollOffset)
+    end
+
+    -- Hide all display elements first
     for i = 1, MAX_VISIBLE_ROWS do
-        local row = rows[i]
-        local entry = standings[i]
+        displayRows[i]:Hide()
+    end
+    for i = 1, #groupHeaders do
+        groupHeaders[i]:Hide()
+    end
 
-        if entry then
-            row:Show()
+    -- Lay out visible items
+    local rowIdx = 0
+    local headerIdx = 0
+    local yPos = 0
 
-            -- Rank display: medals for top 3
-            if i == 1 then
-                row.rank:SetText("#1")
-                row.rank:SetTextColor(1.0, 0.84, 0.0) -- gold
-            elseif i == 2 then
-                row.rank:SetText("#2")
-                row.rank:SetTextColor(0.75, 0.75, 0.75) -- silver
-            elseif i == 3 then
-                row.rank:SetText("#3")
-                row.rank:SetTextColor(0.80, 0.50, 0.20) -- bronze
+    for i = scrollOffset + 1, math.min(#items, scrollOffset + MAX_VISIBLE_ROWS) do
+        local item = items[i]
+
+        if item.type == "header" then
+            headerIdx = headerIdx + 1
+            local header = groupHeaders[headerIdx]
+            if not header then
+                -- Create more headers if needed
+                header = CreateGroupHeader(frame)
+                groupHeaders[headerIdx] = header
+            end
+
+            header:ClearAllPoints()
+            header:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -(CONTROLS_HEIGHT + yPos))
+            header:SetPoint("RIGHT", frame, "RIGHT", -24, 0)
+
+            -- Arrow indicator for collapse state
+            if item.collapsed then
+                header.arrow:SetText("+")
             else
-                row.rank:SetText(tostring(i))
+                header.arrow:SetText("-")
+            end
+
+            -- Group name with class color if applicable
+            local displayName = item.displayName
+            if activeGrouping == "class" then
+                local classColor = RAID_CLASS_COLORS[item.key]
+                if classColor then
+                    header.label:SetTextColor(classColor.r, classColor.g, classColor.b)
+                else
+                    header.label:SetTextColor(1.0, 0.82, 0.0)
+                end
+            else
+                header.label:SetTextColor(1.0, 0.82, 0.0)
+            end
+            header.label:SetText(displayName)
+
+            -- Member count
+            header.countText:SetText("(" .. item.count .. ")")
+            header.countText:SetTextColor(0.7, 0.7, 0.7)
+
+            -- Click handler for collapse/expand
+            local groupKey = item.key
+            header:SetScript("OnClick", function()
+                collapsedGroups[groupKey] = not collapsedGroups[groupKey]
+                scrollOffset = 0
+                Leaderboard:Refresh()
+            end)
+
+            header:Show()
+            yPos = yPos + GROUP_HEADER_HEIGHT
+
+        elseif item.type == "row" then
+            rowIdx = rowIdx + 1
+            local row = displayRows[rowIdx]
+            if not row then
+                row = CreateDataRow(frame)
+                displayRows[rowIdx] = row
+            end
+
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -(CONTROLS_HEIGHT + yPos))
+            row:SetPoint("RIGHT", frame, "RIGHT", -24, 0)
+
+            local entry = item.entry
+            local rank = item.rank
+
+            -- Rank display: medals for top 3 (only in flat mode)
+            if activeGrouping == "none" then
+                if rank == 1 then
+                    row.rank:SetText("#1")
+                    row.rank:SetTextColor(1.0, 0.84, 0.0)
+                elseif rank == 2 then
+                    row.rank:SetText("#2")
+                    row.rank:SetTextColor(0.75, 0.75, 0.75)
+                elseif rank == 3 then
+                    row.rank:SetText("#3")
+                    row.rank:SetTextColor(0.80, 0.50, 0.20)
+                else
+                    row.rank:SetText(tostring(rank))
+                    row.rank:SetTextColor(0.8, 0.8, 0.8)
+                end
+            else
+                row.rank:SetText(tostring(rank))
                 row.rank:SetTextColor(0.8, 0.8, 0.8)
             end
 
@@ -238,7 +554,7 @@ function Leaderboard:Refresh()
             row.gp:SetTextColor(1, 1, 1)
 
             row.pr:SetText(format("%.2f", entry.pr))
-            row.pr:SetTextColor(0.5, 1.0, 0.5) -- green
+            row.pr:SetTextColor(0.5, 1.0, 0.5)
 
             -- Highlight current player
             if entry.name == playerName then
@@ -247,8 +563,9 @@ function Leaderboard:Refresh()
             else
                 row.highlight:Hide()
             end
-        else
-            row:Hide()
+
+            row:Show()
+            yPos = yPos + ROW_HEIGHT
         end
     end
 end
@@ -322,6 +639,75 @@ function Leaderboard:AnnounceTop(count, channel)
             i, e.name, e.pr, e.ep, e.gp)
         SendChatMessage(line, channel)
     end
+end
+
+--------------------------------------------------------------------------------
+-- Accessors (for testing and external use)
+--------------------------------------------------------------------------------
+
+--- Get the current active grouping mode.
+-- @return string "none", "class", or "role"
+function Leaderboard:GetGrouping()
+    return activeGrouping
+end
+
+--- Set the grouping mode.
+-- @param mode string "none", "class", or "role"
+function Leaderboard:SetGrouping(mode)
+    if mode == "none" or mode == "class" or mode == "role" then
+        activeGrouping = mode
+        collapsedGroups = {}
+        scrollOffset = 0
+        self:Refresh()
+    end
+end
+
+--- Get the collapsed state of a group.
+-- @param groupKey string The group key (class token or role name)
+-- @return boolean True if the group is collapsed
+function Leaderboard:IsGroupCollapsed(groupKey)
+    return collapsedGroups[groupKey] or false
+end
+
+--- Set the collapsed state of a group.
+-- @param groupKey string The group key
+-- @param collapsed boolean True to collapse, false to expand
+function Leaderboard:SetGroupCollapsed(groupKey, collapsed)
+    collapsedGroups[groupKey] = collapsed or nil
+    self:Refresh()
+end
+
+--- Get the current display items (for testing).
+-- @return array of display items ({type, ...})
+function Leaderboard:GetDisplayItems()
+    local standings = GetFilteredStandings(activeFilter)
+    return BuildDisplayItems(standings, activeGrouping, collapsedGroups)
+end
+
+--- Get the current active filter.
+-- @return string "all", "raiders", or "online"
+function Leaderboard:GetFilter()
+    return activeFilter
+end
+
+--- Set the active filter.
+-- @param filter string "all", "raiders", or "online"
+function Leaderboard:SetFilter(filter)
+    activeFilter = filter or "all"
+    scrollOffset = 0
+    self:Refresh()
+end
+
+--- Get the role mapping table (for testing).
+-- @return table mapping class tokens to role names
+function Leaderboard:GetClassRoleMap()
+    return CLASS_ROLE
+end
+
+--- Get the class display name table (for testing).
+-- @return table mapping class tokens to display names
+function Leaderboard:GetClassDisplayNames()
+    return CLASS_DISPLAY
 end
 
 --------------------------------------------------------------------------------
