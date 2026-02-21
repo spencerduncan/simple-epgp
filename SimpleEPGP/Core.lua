@@ -169,6 +169,8 @@ function SimpleEPGP:HandleSlashCommand(input)
         self:GetModule("Leaderboard"):Toggle()
     elseif cmd == "top" then
         self:CmdTop(args)
+    elseif cmd == "standbyui" then
+        self:GetModule("StandbyManager"):Toggle()
     elseif cmd == "debug" then
         self:GetModule("Debug"):HandleCommand(args)
     elseif cmd == "help" then
@@ -557,6 +559,7 @@ function SimpleEPGP:PrintUsage()
     self:Print("  /sepgp export — Open CSV export window")
     self:Print("  /sepgp log [N] — Show last N log entries")
     self:Print("  /sepgp reset — Reset all EP/GP (requires /sepgp confirm)")
+    self:Print("  /sepgp standbyui — Open standby list manager")
     self:Print("  /sepgp board — Open leaderboard")
     self:Print("  /sepgp top [N] — Announce top N to guild chat")
     self:Print("  /sepgp debug — Debug/testing commands (see /sepgp debug help)")
