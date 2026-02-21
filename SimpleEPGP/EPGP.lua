@@ -473,6 +473,14 @@ function EPGP:MassEP(amount, reason)
                 gp = gp or 0
                 GuildRosterSetOfficerNote(index, self:EncodeNote(ep, gp))
                 awarded = awarded + 1
+            elseif self:IsExternalPlayer(shortName) then
+                -- External player in raid but not in guild — award EP to SavedVariables
+                local normalized = NormalizeName(shortName)
+                local ext = db.profile.external_players[normalized]
+                ext.ep = math.max((ext.ep or 0) + amount, 0)
+                ext.modified_by = UnitName("player")
+                ext.modified_at = time()
+                awarded = awarded + 1
             end
         end
     end
@@ -490,6 +498,13 @@ function EPGP:MassEP(amount, reason)
                     ep = (ep or 0) + standbyAmount
                     gp = gp or 0
                     GuildRosterSetOfficerNote(index, self:EncodeNote(ep, gp))
+                elseif self:IsExternalPlayer(standbyName) then
+                    -- External player on standby — award standby EP to SavedVariables
+                    local normalized = NormalizeName(standbyName)
+                    local ext = db.profile.external_players[normalized]
+                    ext.ep = math.max((ext.ep or 0) + standbyAmount, 0)
+                    ext.modified_by = UnitName("player")
+                    ext.modified_at = time()
                 end
             end
         end
