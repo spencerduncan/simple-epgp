@@ -145,13 +145,15 @@ end
 --- Send a STANDINGS_SYNC to a specific player via whisper.
 -- @param targetPlayer string The player name to send standings to.
 -- @param standingsData table Array of {name, class, ep, gp} entries.
-function Comms:SendStandingsSync(targetPlayer, standingsData)
+-- @param configData table|nil Optional GP config from EPGP:ExportConfig().
+function Comms:SendStandingsSync(targetPlayer, standingsData, configData)
     local Debug = SimpleEPGP:GetModule("Debug", true)
     if Debug then Debug:Log("COMMS", "SendStandingsSync", { target = targetPlayer, count = #standingsData }) end
 
     local payload = self:Serialize({
         type = "STANDINGS_SYNC",
         standings = standingsData,
+        config = configData,
     })
     self:SendCommMessage(COMM_PREFIX, payload, "WHISPER", targetPlayer, "BULK")
 end
