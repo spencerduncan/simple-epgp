@@ -1,0 +1,34 @@
+## Interface: 20505
+## Title: SimpleEPGP
+## Notes: Simple EPGP loot distribution for TBC Anniversary
+## Author: Penny
+## Version: 0.1.0
+## SavedVariables: SimpleEPGPDB, SimpleEPGPDebugLog
+## OptionalDeps: Ace3
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\AceAddon-3.0\AceAddon-3.0.lua
+Libs\AceDB-3.0\AceDB-3.0.lua
+Libs\AceEvent-3.0\AceEvent-3.0.lua
+Libs\AceConsole-3.0\AceConsole-3.0.lua
+Libs\AceComm-3.0\ChatThrottleLib.lua
+Libs\AceComm-3.0\AceComm-3.0.lua
+Libs\AceSerializer-3.0\AceSerializer-3.0.lua
+Libs\LibDeflate\LibDeflate.lua
+
+Core.lua
+Debug.lua
+EPGP.lua
+GPCalc.lua
+Log.lua
+Comms.lua
+LootMaster.lua
+UI\Standings.lua
+UI\LootPopup.lua
+UI\AwardFrame.lua
+UI\Config.lua
+UI\GPConfig.lua
+UI\ExportFrame.lua
+UI\Tooltip.lua
+UI\Leaderboard.lua

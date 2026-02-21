@@ -1,0 +1,16 @@
+# Lua build artifacts
+*.luac
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Claude working files (not part of the addon)
+.claude/
