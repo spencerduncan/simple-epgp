@@ -461,6 +461,28 @@ end
 -- happen in quick succession (e.g. Decay, MassEP).
 local broadcastPending = false
 
+--- Export current GP config for broadcasting to non-officers.
+-- Returns a compact table of all config values that affect GP calculations.
+-- @return table with keys: sm (slot_multipliers), io (item_overrides),
+--   om (os_multiplier), dm (de_multiplier), bg (base_gp),
+--   si (standard_ilvl), bm (gp_base_multiplier or nil).
+function EPGP:ExportConfig()
+    local db = SimpleEPGP.db
+    local config = {
+        sm = db.profile.slot_multipliers or {},
+        io = db.profile.item_overrides or {},
+        om = db.profile.os_multiplier or 0.5,
+        dm = db.profile.de_multiplier or 0.0,
+        bg = db.profile.base_gp or 100,
+        si = db.profile.standard_ilvl or 120,
+    }
+    -- Only include gp_base_multiplier if explicitly set (nil means auto-derived)
+    if db.profile.gp_base_multiplier then
+        config.bm = db.profile.gp_base_multiplier
+    end
+    return config
+end
+
 --- Broadcast current standings to GUILD channel so non-officers get updates.
 -- Debounced: multiple calls within 2 seconds collapse into a single broadcast.
 -- Only fires if we can actually read officer notes (officer-side only).
@@ -490,10 +512,12 @@ function EPGP:BroadcastStandings()
         if Debug then Debug:Log("EPGP", "Broadcasting standings", { count = #data }) end
 
         -- Broadcast to GUILD so all non-officers receive it
+        -- Include GP config so non-officers can compute correct tooltips
         local Comms = SimpleEPGP:GetModule("Comms")
         local payload = Comms:Serialize({
             type = "STANDINGS_SYNC",
             standings = data,
+            config = EPGP:ExportConfig(),
         })
         Comms:SendCommMessage("SimpleEPGP", payload, "GUILD", nil, "BULK")
     end)
@@ -561,7 +585,7 @@ function EPGP:CheckNeedSync()
 end
 
 --- Handle incoming STANDINGS_REQUEST from a non-officer.
--- If we can read notes and have valid data, respond with standings.
+-- If we can read notes and have valid data, respond with standings + config.
 -- Uses a short random delay (1-3s) so multiple officers don't all
 -- respond simultaneously to the same request.
 -- @param sender string The requesting player's name.
@@ -591,14 +615,66 @@ function EPGP:OnStandingsRequest(sender)
         end
 
         local Comms = SimpleEPGP:GetModule("Comms")
-        Comms:SendStandingsSync(sender, data)
+        Comms:SendStandingsSync(sender, data, EPGP:ExportConfig())
     end)
 end
 
+--- Apply received GP config from an officer to local settings.
+-- Only called on non-officer clients. Updates slot multipliers, item overrides,
+-- bid multipliers, and formula parameters so tooltips/GP calculations match
+-- the officer's configuration.
+-- @param config table Compact config table from ExportConfig (keys: sm, io, om, dm, bg, si, bm).
+function EPGP:ApplyReceivedConfig(config)
+    if not config then return end
+
+    local db = SimpleEPGP.db
+    local GPCalc = SimpleEPGP:GetModule("GPCalc")
+    local Debug = SimpleEPGP:GetModule("Debug", true)
+
+    -- Slot multipliers (sm)
+    if config.sm then
+        db.profile.slot_multipliers = config.sm
+    end
+
+    -- Item overrides (io)
+    if config.io then
+        db.profile.item_overrides = config.io
+    end
+
+    -- OS multiplier (om)
+    if config.om ~= nil then
+        db.profile.os_multiplier = config.om
+    end
+
+    -- DE multiplier (dm)
+    if config.dm ~= nil then
+        db.profile.de_multiplier = config.dm
+    end
+
+    -- Base GP (bg) — uses GPCalc setter for validation
+    if config.bg ~= nil then
+        GPCalc:SetBaseGP(config.bg)
+    end
+
+    -- Standard ilvl (si) — uses GPCalc setter for validation
+    if config.si ~= nil then
+        GPCalc:SetStandardIlvl(config.si)
+    end
+
+    -- GP base multiplier (bm) — nil means auto-derived
+    if config.bm ~= nil then
+        GPCalc:SetGPBaseMultiplier(config.bm)
+    else
+        GPCalc:ClearGPBaseMultiplier()
+    end
+
+    if Debug then Debug:Log("EPGP", "Applied GP config from officer") end
+end
+
 --- Handle incoming STANDINGS_SYNC from an officer.
--- Populates the local standings cache with the received data.
+-- Applies GP config (if present) then populates the local standings cache.
 -- @param sender string The officer who sent the data.
--- @param data table Contains data.standings array of {n, c, e, g}.
+-- @param data table Contains data.standings array of {n, c, e, g} and optional data.config.
 function EPGP:OnStandingsSync(sender, data)
     if not data or not data.standings then return end
 
@@ -607,6 +683,10 @@ function EPGP:OnStandingsSync(sender, data)
 
     local Debug = SimpleEPGP:GetModule("Debug", true)
     if Debug then Debug:Log("EPGP", "Received standings sync", { from = sender, count = #data.standings }) end
+
+    -- Apply GP config BEFORE processing standings so PR calculation uses
+    -- the officer's base_gp value (not the local default).
+    self:ApplyReceivedConfig(data.config)
 
     local db = SimpleEPGP.db
     local baseGP = db.profile.base_gp or 1
