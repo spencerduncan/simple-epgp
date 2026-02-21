@@ -172,6 +172,8 @@ function SimpleEPGP:HandleSlashCommand(input)
         self:GetModule("Leaderboard"):Toggle()
     elseif cmd == "top" then
         self:CmdTop(args)
+    elseif cmd == "standbyui" then
+        self:GetModule("StandbyManager"):Toggle()
     elseif cmd == "loot" then
         self:CmdLoot(args, input)
     elseif cmd == "debug" then
@@ -356,6 +358,7 @@ function SimpleEPGP:CmdStandby(args)
         end
         self.db.standby[#self.db.standby + 1] = name
         self:Print(name .. " added to standby list.")
+        self:SendMessage("SEPGP_STANDBY_UPDATED")
 
     elseif sub == "remove" then
         if not name then
@@ -366,6 +369,7 @@ function SimpleEPGP:CmdStandby(args)
             if v == name then
                 table.remove(self.db.standby, i)
                 self:Print(name .. " removed from standby list.")
+                self:SendMessage("SEPGP_STANDBY_UPDATED")
                 return
             end
         end
@@ -375,6 +379,7 @@ function SimpleEPGP:CmdStandby(args)
         local count = #self.db.standby
         self.db.standby = {}
         self:Print("Standby list cleared (" .. count .. " names removed).")
+        self:SendMessage("SEPGP_STANDBY_UPDATED")
 
     elseif sub == "list" then
         local list = self.db.standby
@@ -669,6 +674,7 @@ function SimpleEPGP:PrintUsage()
     self:Print("  /sepgp export — Open CSV export window")
     self:Print("  /sepgp log [N] — Show last N log entries")
     self:Print("  /sepgp reset — Reset all EP/GP (requires /sepgp confirm)")
+    self:Print("  /sepgp standbyui — Open standby list manager")
     self:Print("  /sepgp officer — Open officer EP/GP panel")
     self:Print("  /sepgp board — Open leaderboard")
     self:Print("  /sepgp top [N] — Announce top N to guild chat")
