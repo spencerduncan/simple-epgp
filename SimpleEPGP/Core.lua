@@ -165,6 +165,8 @@ function SimpleEPGP:HandleSlashCommand(input)
         self:CmdLog(args)
     elseif cmd == "reset" then
         self:CmdReset()
+    elseif cmd == "officer" then
+        self:GetModule("OfficerPanel"):Toggle()
     elseif cmd == "board" or cmd == "leaderboard" then
         self:GetModule("Leaderboard"):Toggle()
     elseif cmd == "top" then
@@ -557,6 +559,7 @@ function SimpleEPGP:PrintUsage()
     self:Print("  /sepgp export — Open CSV export window")
     self:Print("  /sepgp log [N] — Show last N log entries")
     self:Print("  /sepgp reset — Reset all EP/GP (requires /sepgp confirm)")
+    self:Print("  /sepgp officer — Open officer EP/GP panel")
     self:Print("  /sepgp board — Open leaderboard")
     self:Print("  /sepgp top [N] — Announce top N to guild chat")
     self:Print("  /sepgp debug — Debug/testing commands (see /sepgp debug help)")
