@@ -48,6 +48,9 @@ describe("Debug", function()
         local LootMaster = SimpleEPGP:GetModule("LootMaster")
         LootMaster.sessions = {}
         LootMaster.nextSessionId = 1
+
+        -- Clear any pending item request from a previous test
+        Debug._pendingItemID = nil
     end)
 
     describe("Logging", function()
@@ -267,20 +270,304 @@ describe("Debug", function()
     end)
 
     describe("debug loot", function()
-        it("starts a loot session", function()
+        it("starts a loot session with cached item using real link", function()
             _G.SimpleEPGPDebugLog = {}
             Debug:CmdLoot({ "debug", "loot", "29759" })
 
-            -- Check the loot session was created
+            -- Check the loot session was created with the real link
             local LootMaster = SimpleEPGP:GetModule("LootMaster")
             local hasSession = false
             for _, session in pairs(LootMaster.sessions) do
                 if not session.awarded then
                     hasSession = true
+                    -- Verify it used the real link, not a fake one
+                    assert.truthy(session.itemLink:find("Helm of the Fallen Champion"))
+                    assert.falsy(session.itemLink:find("Test Item"))
                     break
                 end
             end
             assert.is_true(hasSession)
+        end)
+
+        it("uses real GP calculation for cached items", function()
+            _G.SimpleEPGPDebugLog = {}
+            Debug:CmdLoot({ "debug", "loot", "29759" })
+
+            -- Verify GP was calculated from real item data, not fallback 100
+            local LootMaster = SimpleEPGP:GetModule("LootMaster")
+            for _, session in pairs(LootMaster.sessions) do
+                if not session.awarded then
+                    -- ilvl 120 HEAD with default config should produce a real GP value
+                    local GPCalc = SimpleEPGP:GetModule("GPCalc")
+                    local expectedGP = GPCalc:CalculateGP(session.itemLink)
+                    assert.equals(expectedGP, session.gpCost)
+                    break
+                end
+            end
+        end)
+
+        it("requests uncached item from server", function()
+            -- Temporarily make GetItemInfo return nil for a known ID
+            local origGetItemInfo = _G.GetItemInfo
+            local uncachedID = 99990
+            _G.GetItemInfo = function(idOrLink)
+                local id = idOrLink
+                if type(id) == "string" then
+                    id = tonumber(id:match("item:(%d+)")) or tonumber(id)
+                end
+                if id == uncachedID then return nil end
+                return origGetItemInfo(idOrLink)
+            end
+
+            -- Capture C_Timer.After calls instead of executing immediately
+            local capturedTimerFunc = nil
+            local origTimerAfter = _G.C_Timer.After
+            _G.C_Timer.After = function(seconds, func)
+                capturedTimerFunc = func
+            end
+
+            -- Track C_Item.RequestLoadItemDataByID calls
+            local requestedID = nil
+            local origRequest = _G.C_Item.RequestLoadItemDataByID
+            _G.C_Item.RequestLoadItemDataByID = function(id)
+                requestedID = id
+            end
+
+            _G.SimpleEPGPDebugLog = {}
+            Debug:CmdLoot({ "debug", "loot", tostring(uncachedID) })
+
+            -- Should have set pending state
+            assert.equals(uncachedID, Debug._pendingItemID)
+
+            -- Should have requested the item
+            assert.equals(uncachedID, requestedID)
+
+            -- No session should exist yet
+            local LootMaster = SimpleEPGP:GetModule("LootMaster")
+            local sessionCount = 0
+            for _ in pairs(LootMaster.sessions) do
+                sessionCount = sessionCount + 1
+            end
+            assert.equals(0, sessionCount)
+
+            -- Cleanup
+            Debug._pendingItemID = nil
+            Debug:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+            _G.GetItemInfo = origGetItemInfo
+            _G.C_Timer.After = origTimerAfter
+            _G.C_Item.RequestLoadItemDataByID = origRequest
+        end)
+
+        it("starts session when GET_ITEM_INFO_RECEIVED fires", function()
+            -- Use item 28789 (Eye of Gruul) but make it "uncached" initially
+            local targetID = 28789
+            local uncached = true
+            local origGetItemInfo = _G.GetItemInfo
+            _G.GetItemInfo = function(idOrLink)
+                local id = idOrLink
+                if type(id) == "string" then
+                    id = tonumber(id:match("item:(%d+)")) or tonumber(id)
+                end
+                if id == targetID and uncached then return nil end
+                return origGetItemInfo(idOrLink)
+            end
+
+            -- Defer C_Timer.After
+            local capturedTimerFunc = nil
+            local origTimerAfter = _G.C_Timer.After
+            _G.C_Timer.After = function(seconds, func)
+                capturedTimerFunc = func
+            end
+
+            _G.SimpleEPGPDebugLog = {}
+            Debug:CmdLoot({ "debug", "loot", tostring(targetID) })
+
+            -- Now "cache" the item and fire the event
+            uncached = false
+            _G._testFireEvent("GET_ITEM_INFO_RECEIVED", targetID, true)
+
+            -- Session should now exist with real link
+            local LootMaster = SimpleEPGP:GetModule("LootMaster")
+            local hasSession = false
+            for _, session in pairs(LootMaster.sessions) do
+                if not session.awarded then
+                    hasSession = true
+                    assert.truthy(session.itemLink:find("Eye of Gruul"))
+                    break
+                end
+            end
+            assert.is_true(hasSession)
+
+            -- Pending state should be cleared
+            assert.is_nil(Debug._pendingItemID)
+
+            -- Cleanup
+            _G.GetItemInfo = origGetItemInfo
+            _G.C_Timer.After = origTimerAfter
+        end)
+
+        it("times out after 5s if item does not exist", function()
+            local fakeID = 99991
+            local origGetItemInfo = _G.GetItemInfo
+            _G.GetItemInfo = function(idOrLink)
+                local id = idOrLink
+                if type(id) == "string" then
+                    id = tonumber(id:match("item:(%d+)")) or tonumber(id)
+                end
+                if id == fakeID then return nil end
+                return origGetItemInfo(idOrLink)
+            end
+
+            -- Capture the timer callback
+            local capturedTimerFunc = nil
+            local origTimerAfter = _G.C_Timer.After
+            _G.C_Timer.After = function(seconds, func)
+                assert.equals(5, seconds)
+                capturedTimerFunc = func
+            end
+
+            _G.SimpleEPGPDebugLog = {}
+            Debug:CmdLoot({ "debug", "loot", tostring(fakeID) })
+
+            assert.equals(fakeID, Debug._pendingItemID)
+            assert.is_not_nil(capturedTimerFunc)
+
+            -- Fire the timeout
+            capturedTimerFunc()
+
+            -- Pending state should be cleared
+            assert.is_nil(Debug._pendingItemID)
+
+            -- Check timeout was logged
+            local found = false
+            for _, entry in ipairs(_G.SimpleEPGPDebugLog) do
+                if entry[2] == "WARN" and entry[3] == "Item request timed out" then
+                    found = true
+                    assert.equals(fakeID, entry[4].itemID)
+                    break
+                end
+            end
+            assert.is_true(found)
+
+            -- Cleanup
+            _G.GetItemInfo = origGetItemInfo
+            _G.C_Timer.After = origTimerAfter
+        end)
+
+        it("ignores GET_ITEM_INFO_RECEIVED for different itemID", function()
+            local targetID = 28789
+            local origGetItemInfo = _G.GetItemInfo
+            _G.GetItemInfo = function(idOrLink)
+                local id = idOrLink
+                if type(id) == "string" then
+                    id = tonumber(id:match("item:(%d+)")) or tonumber(id)
+                end
+                if id == targetID then return nil end
+                return origGetItemInfo(idOrLink)
+            end
+
+            -- Defer timeout
+            local origTimerAfter = _G.C_Timer.After
+            _G.C_Timer.After = function() end
+
+            Debug:CmdLoot({ "debug", "loot", tostring(targetID) })
+            assert.equals(targetID, Debug._pendingItemID)
+
+            -- Fire event with DIFFERENT item ID
+            _G._testFireEvent("GET_ITEM_INFO_RECEIVED", 99999, true)
+
+            -- Should still be pending (event was for a different item)
+            assert.equals(targetID, Debug._pendingItemID)
+
+            -- Cleanup
+            Debug._pendingItemID = nil
+            Debug:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+            _G.GetItemInfo = origGetItemInfo
+            _G.C_Timer.After = origTimerAfter
+        end)
+
+        it("handles failed item load (success=false)", function()
+            local targetID = 28789
+            local origGetItemInfo = _G.GetItemInfo
+            _G.GetItemInfo = function(idOrLink)
+                local id = idOrLink
+                if type(id) == "string" then
+                    id = tonumber(id:match("item:(%d+)")) or tonumber(id)
+                end
+                if id == targetID then return nil end
+                return origGetItemInfo(idOrLink)
+            end
+
+            -- Defer timeout
+            local origTimerAfter = _G.C_Timer.After
+            _G.C_Timer.After = function() end
+
+            _G.SimpleEPGPDebugLog = {}
+            Debug:CmdLoot({ "debug", "loot", tostring(targetID) })
+
+            -- Fire event with success=false
+            _G._testFireEvent("GET_ITEM_INFO_RECEIVED", targetID, false)
+
+            -- Pending state should be cleared
+            assert.is_nil(Debug._pendingItemID)
+
+            -- No session should be created
+            local LootMaster = SimpleEPGP:GetModule("LootMaster")
+            local sessionCount = 0
+            for _ in pairs(LootMaster.sessions) do
+                sessionCount = sessionCount + 1
+            end
+            assert.equals(0, sessionCount)
+
+            -- Check failure was logged
+            local found = false
+            for _, entry in ipairs(_G.SimpleEPGPDebugLog) do
+                if entry[2] == "WARN" and entry[3] == "Item request failed" then
+                    found = true
+                    break
+                end
+            end
+            assert.is_true(found)
+
+            -- Cleanup
+            _G.GetItemInfo = origGetItemInfo
+            _G.C_Timer.After = origTimerAfter
+        end)
+
+        it("timeout is no-op after successful item load", function()
+            local targetID = 28789
+            local uncached = true
+            local origGetItemInfo = _G.GetItemInfo
+            _G.GetItemInfo = function(idOrLink)
+                local id = idOrLink
+                if type(id) == "string" then
+                    id = tonumber(id:match("item:(%d+)")) or tonumber(id)
+                end
+                if id == targetID and uncached then return nil end
+                return origGetItemInfo(idOrLink)
+            end
+
+            -- Capture the timer callback
+            local capturedTimerFunc = nil
+            local origTimerAfter = _G.C_Timer.After
+            _G.C_Timer.After = function(seconds, func)
+                capturedTimerFunc = func
+            end
+
+            Debug:CmdLoot({ "debug", "loot", tostring(targetID) })
+
+            -- Simulate item loading successfully
+            uncached = false
+            _G._testFireEvent("GET_ITEM_INFO_RECEIVED", targetID, true)
+
+            -- Now fire the timeout — should be a no-op since _pendingItemID was cleared
+            assert.is_nil(Debug._pendingItemID)
+            capturedTimerFunc()  -- Should not error or change state
+            assert.is_nil(Debug._pendingItemID)
+
+            -- Cleanup
+            _G.GetItemInfo = origGetItemInfo
+            _G.C_Timer.After = origTimerAfter
         end)
     end)
 

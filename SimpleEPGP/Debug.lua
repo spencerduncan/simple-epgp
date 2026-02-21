@@ -5,7 +5,7 @@
 -- simulating game events without needing a raid group.
 -----------------------------------------------------------------------
 local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
-local Debug = SimpleEPGP:NewModule("Debug")
+local Debug = SimpleEPGP:NewModule("Debug", "AceEvent-3.0")
 
 local time = time
 local ipairs = ipairs
@@ -308,14 +308,72 @@ end
 
 function Debug:CmdLoot(args)
     local itemID = tonumber(args[3]) or 29759  -- Default: T4 Helm of the Fallen Hero
-    local itemLink = "|cffff8000|Hitem:" .. itemID .. "::::::::70:::::|h[Test Item " .. itemID .. "]|h|r"
 
     -- Try to get real item info if cached
-    local realName, realLink = GetItemInfo(itemID)
-    if realName and realLink then
-        itemLink = realLink
+    local itemName, itemLink = GetItemInfo(itemID)
+    if itemName and itemLink then
+        self:StartLootSession(itemID, itemLink)
+        return
     end
 
+    -- Item not cached — request from server and wait for event
+    SimpleEPGP:Print("Item " .. itemID .. " not cached, requesting from server...")
+    self._pendingItemID = itemID
+
+    self:RegisterEvent("GET_ITEM_INFO_RECEIVED", "OnItemInfoReceived")
+
+    -- Request the item data from the server
+    if C_Item and C_Item.RequestLoadItemDataByID then
+        C_Item.RequestLoadItemDataByID(itemID)
+    else
+        -- Fallback: calling GetItemInfo also triggers a server request
+        GetItemInfo(itemID)
+    end
+
+    -- Timeout after 5 seconds in case the item doesn't exist
+    C_Timer.After(5, function()
+        if self._pendingItemID == itemID then
+            self._pendingItemID = nil
+            self:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+            SimpleEPGP:Print("Timed out waiting for item " .. itemID .. ". Item may not exist.")
+            self:Log("WARN", "Item request timed out", { itemID = itemID })
+        end
+    end)
+end
+
+--- Handle GET_ITEM_INFO_RECEIVED for pending debug loot requests.
+-- @param event string The event name
+-- @param receivedItemID number The item ID that was loaded
+-- @param success boolean Whether the item data was loaded successfully
+function Debug:OnItemInfoReceived(event, receivedItemID, success)
+    if not self._pendingItemID then return end
+    if receivedItemID ~= self._pendingItemID then return end
+
+    local itemID = self._pendingItemID
+    self._pendingItemID = nil
+    self:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+
+    if not success then
+        SimpleEPGP:Print("Failed to load item " .. itemID .. ". Item may not exist.")
+        self:Log("WARN", "Item request failed", { itemID = itemID })
+        return
+    end
+
+    local itemName, itemLink = GetItemInfo(itemID)
+    if not itemName or not itemLink then
+        SimpleEPGP:Print("Item " .. itemID .. " data received but GetItemInfo still returned nil.")
+        self:Log("WARN", "Item data inconsistency", { itemID = itemID })
+        return
+    end
+
+    self:StartLootSession(itemID, itemLink)
+end
+
+--- Start a loot session with a real item link.
+-- Shared by the cached path (immediate) and uncached path (after event).
+-- @param itemID number The item ID
+-- @param itemLink string The real item link from GetItemInfo
+function Debug:StartLootSession(itemID, itemLink)
     self:Log("LOOT", "Simulating loot drop", { itemID = itemID, itemLink = itemLink })
     SimpleEPGP:Print("Simulating loot: " .. itemLink)
 
