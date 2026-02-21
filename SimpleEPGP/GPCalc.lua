@@ -2,7 +2,6 @@ local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local GPCalc = SimpleEPGP:NewModule("GPCalc")
 
 local floor = math.floor
-local pairs = pairs
 local tonumber = tonumber
 local GetItemInfo = GetItemInfo
 
@@ -90,7 +89,7 @@ function GPCalc:GetAllSlotInfo()
     local overrides = db.profile.slot_multipliers or {}
     local result = {}
 
-    for _, key in pairs(SLOT_ORDER) do
+    for _, key in ipairs(SLOT_ORDER) do
         local default = DEFAULT_SLOT_MULTIPLIERS[key]
         local override = overrides[key]
         result[#result + 1] = {

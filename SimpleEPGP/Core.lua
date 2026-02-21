@@ -483,13 +483,17 @@ function SimpleEPGP:CmdGPOverride(args)
 
     if sub == "list" then
         local overrides = GPCalc:GetAllItemOverrides()
-        local count = 0
-        for _ in pairs(overrides) do count = count + 1 end
-        if count == 0 then
+        local sortedIDs = {}
+        for id in pairs(overrides) do
+            sortedIDs[#sortedIDs + 1] = id
+        end
+        if #sortedIDs == 0 then
             self:Print("No item GP overrides set.")
         else
-            self:Print("Item GP overrides (" .. count .. "):")
-            for itemID, gpCost in pairs(overrides) do
+            table.sort(sortedIDs)
+            self:Print("Item GP overrides (" .. #sortedIDs .. "):")
+            for _, itemID in ipairs(sortedIDs) do
+                local gpCost = overrides[itemID]
                 local name = GetItemInfo(itemID)
                 local display = name or ("item:" .. itemID)
                 self:Print("  " .. display .. " = " .. gpCost .. " GP")
