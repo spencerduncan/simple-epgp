@@ -30,15 +30,41 @@ local sortedData = {}
 local sortColumn = "pr"
 local sortAscending = false
 local scrollOffset = 0
+local filterRaidOnly = false
+
+--- Build a set of short names for players currently in the raid.
+-- @return table Set of short names (keys) with true values, or empty table if not in a raid.
+local function GetRaidMemberNames()
+    local names = {}
+    if not IsInRaid() then return names end
+    local numRaid = GetNumGroupMembers()
+    for i = 1, numRaid do
+        local name = GetRaidRosterInfo(i)
+        if name then
+            local shortName = name:match("^([^%-]+)") or name
+            names[shortName] = true
+        end
+    end
+    return names
+end
 
 local function SortData()
     local EPGP = SimpleEPGP:GetModule("EPGP")
     local raw = EPGP:GetStandings()
 
-    -- Copy into sortedData so we don't mutate the original
+    -- Copy into sortedData, applying raid filter if active
     sortedData = {}
-    for i = 1, #raw do
-        sortedData[i] = raw[i]
+    if filterRaidOnly then
+        local raidNames = GetRaidMemberNames()
+        for i = 1, #raw do
+            if raidNames[raw[i].name] then
+                sortedData[#sortedData + 1] = raw[i]
+            end
+        end
+    else
+        for i = 1, #raw do
+            sortedData[i] = raw[i]
+        end
     end
 
     sort(sortedData, function(a, b)
@@ -101,7 +127,7 @@ local function UpdateRows()
     end
 end
 
-local function OnScrollChanged(self, value)
+local function OnScrollChanged(_, value)
     scrollOffset = floor(value)
     UpdateRows()
 end
@@ -151,6 +177,22 @@ local function CreateRow(parent, index)
     return row
 end
 
+local function RefreshDisplay()
+    if not frame or not frame:IsShown() then return end
+
+    SortData()
+
+    -- Update scroll bar range
+    local maxScroll = math.max(0, #sortedData - VISIBLE_ROWS)
+    frame.scrollBar:SetMinMaxValues(0, maxScroll)
+    if scrollOffset > maxScroll then
+        scrollOffset = maxScroll
+        frame.scrollBar:SetValue(scrollOffset)
+    end
+
+    UpdateRows()
+end
+
 local function CreateFrame_()
     frame = CreateFrame("Frame", "SimpleEPGPStandingsFrame", UIParent, "BackdropTemplate")
     frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
@@ -179,6 +221,22 @@ local function CreateFrame_()
     local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -2, -2)
     closeBtn:SetScript("OnClick", function() Standings:Hide() end)
+
+    -- "Current Raid" filter checkbox
+    local raidFilter = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+    raidFilter:SetPoint("TOPLEFT", 10, -8)
+    raidFilter:SetSize(20, 20)
+    raidFilter:SetChecked(filterRaidOnly)
+    raidFilter:SetScript("OnClick", function(cb)
+        filterRaidOnly = cb:IsChecked() or false
+        scrollOffset = 0
+        RefreshDisplay()
+    end)
+
+    local raidFilterLabel = raidFilter:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    raidFilterLabel:SetPoint("LEFT", raidFilter, "RIGHT", 2, 0)
+    raidFilterLabel:SetText("Current Raid")
+    frame.raidFilter = raidFilter
 
     -- Content area (below title, above bottom edge)
     local content = CreateFrame("Frame", nil, frame)
@@ -269,22 +327,6 @@ local function CreateFrame_()
     frame:Hide()
 end
 
-local function RefreshDisplay()
-    if not frame or not frame:IsShown() then return end
-
-    SortData()
-
-    -- Update scroll bar range
-    local maxScroll = math.max(0, #sortedData - VISIBLE_ROWS)
-    frame.scrollBar:SetMinMaxValues(0, maxScroll)
-    if scrollOffset > maxScroll then
-        scrollOffset = maxScroll
-        frame.scrollBar:SetValue(scrollOffset)
-    end
-
-    UpdateRows()
-end
-
 function Standings:OnEnable()
     self:RegisterMessage("SEPGP_STANDINGS_UPDATED", RefreshDisplay)
 end
@@ -310,4 +352,27 @@ function Standings:Toggle()
     else
         self:Show()
     end
+end
+
+--- Set the raid-only filter state.
+-- @param enabled boolean Whether to filter to current raid members only.
+function Standings:SetRaidFilter(enabled)
+    filterRaidOnly = enabled
+    if frame and frame.raidFilter then
+        frame.raidFilter:SetChecked(enabled)
+    end
+    scrollOffset = 0
+    RefreshDisplay()
+end
+
+--- Get the current raid-only filter state.
+-- @return boolean Whether the raid filter is active.
+function Standings:GetRaidFilter()
+    return filterRaidOnly
+end
+
+--- Get the current filtered and sorted display data (for testing).
+-- @return array of standings entries currently displayed.
+function Standings:GetDisplayData()
+    return sortedData
 end
