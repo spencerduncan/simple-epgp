@@ -45,7 +45,7 @@ read_globals = {
     "GetAddOnMetadata",
 
     -- WoW Namespaced APIs
-    "C_ChatInfo", "C_GuildInfo", "C_PartyInfo", "C_Timer", "C_AddOns",
+    "C_ChatInfo", "C_GuildInfo", "C_Item", "C_PartyInfo", "C_Timer", "C_AddOns",
 
     -- WoW Constants and Tables
     "RAID_CLASS_COLORS", "ITEM_QUALITY_COLORS", "LE_ITEM_CLASS_WEAPON",
