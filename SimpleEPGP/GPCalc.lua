@@ -4,6 +4,7 @@ local GPCalc = SimpleEPGP:NewModule("GPCalc")
 local floor = math.floor
 local pairs = pairs
 local tonumber = tonumber
+local format = string.format
 local GetItemInfo = GetItemInfo
 
 -- Default slot multipliers keyed by equipLoc from GetItemInfo.
@@ -61,6 +62,103 @@ function GPCalc:GetBaseMultiplier()
     end
     local standardIlvl = db.profile.standard_ilvl or 120
     return 1000 * 2 ^ (-standardIlvl / 26)
+end
+
+--- Get the base GP value (PR denominator offset).
+-- PR = EP / (GP + base_gp). Default is 100.
+-- @return Base GP number.
+function GPCalc:GetBaseGP()
+    local db = SimpleEPGP.db
+    return db.profile.base_gp or 100
+end
+
+--- Set the base GP value (PR denominator offset).
+-- @param value number The new base GP (must be >= 0).
+-- @return true if set successfully.
+function GPCalc:SetBaseGP(value)
+    if type(value) ~= "number" or value < 0 then return false end
+    SimpleEPGP.db.profile.base_gp = value
+    return true
+end
+
+--- Get the standard item level used to derive the base multiplier.
+-- Default is 120 (T4 tier).
+-- @return Standard ilvl number.
+function GPCalc:GetStandardIlvl()
+    local db = SimpleEPGP.db
+    return db.profile.standard_ilvl or 120
+end
+
+--- Set the standard item level for base multiplier derivation.
+-- @param value number The new standard ilvl (must be > 0).
+-- @return true if set successfully.
+function GPCalc:SetStandardIlvl(value)
+    if type(value) ~= "number" or value <= 0 then return false end
+    SimpleEPGP.db.profile.standard_ilvl = value
+    return true
+end
+
+--- Get the explicit GP base multiplier, or nil if auto-derived.
+-- @return number or nil.
+function GPCalc:GetGPBaseMultiplier()
+    return SimpleEPGP.db.profile.gp_base_multiplier
+end
+
+--- Set an explicit GP base multiplier, overriding auto-derivation.
+-- @param value number The new base multiplier (must be > 0).
+-- @return true if set successfully.
+function GPCalc:SetGPBaseMultiplier(value)
+    if type(value) ~= "number" or value <= 0 then return false end
+    SimpleEPGP.db.profile.gp_base_multiplier = value
+    return true
+end
+
+--- Clear the explicit GP base multiplier, reverting to auto-derivation.
+function GPCalc:ClearGPBaseMultiplier()
+    SimpleEPGP.db.profile.gp_base_multiplier = nil
+end
+
+--- Compute the derived base multiplier from standard_ilvl (ignoring explicit override).
+-- @return number The auto-derived base multiplier.
+function GPCalc:GetDerivedBaseMultiplier()
+    local standardIlvl = self:GetStandardIlvl()
+    return 1000 * 2 ^ (-standardIlvl / 26)
+end
+
+--- Get a table describing the current formula parameters and example calculations.
+-- @return Table with fields: base_gp, standard_ilvl, gp_base_multiplier (or nil),
+--   effective_base_mult, example_gp (at standard ilvl, slot 1.0).
+function GPCalc:GetFormulaInfo()
+    local baseMult = self:GetBaseMultiplier()
+    local standardIlvl = self:GetStandardIlvl()
+    local exampleGP = floor(0.5 + baseMult * 2 ^ (standardIlvl / 26) * 1.0)
+
+    return {
+        base_gp = self:GetBaseGP(),
+        standard_ilvl = standardIlvl,
+        gp_base_multiplier = self:GetGPBaseMultiplier(),
+        effective_base_mult = baseMult,
+        example_gp = exampleGP,
+    }
+end
+
+--- Get formatted formula strings with current values substituted.
+-- @return gp_formula, pr_formula, example strings.
+function GPCalc:GetFormulaStrings()
+    local info = self:GetFormulaInfo()
+    local gpFormula = format(
+        "GP = floor(0.5 + %.2f * 2^(ilvl/26) * slotMult)",
+        info.effective_base_mult
+    )
+    local prFormula = format(
+        "PR = EP / (GP + %d)",
+        info.base_gp
+    )
+    local example = format(
+        "Example: ilvl %d, slot 1.0 = %d GP",
+        info.standard_ilvl, info.example_gp
+    )
+    return gpFormula, prFormula, example
 end
 
 --- Check whether a slot key is a known equipment location.
