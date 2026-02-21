@@ -99,8 +99,16 @@ local function RefreshOverrideList(content, startY)
     local GPCalc = SimpleEPGP:GetModule("GPCalc")
     local overrides = GPCalc:GetAllItemOverrides()
 
+    -- Sort item IDs for deterministic display order
+    local sortedIDs = {}
+    for id in pairs(overrides) do
+        sortedIDs[#sortedIDs + 1] = id
+    end
+    table.sort(sortedIDs)
+
     local y = startY
-    for itemID, gpCost in pairs(overrides) do
+    for _, itemID in ipairs(sortedIDs) do
+        local gpCost = overrides[itemID]
         local row = {}
 
         -- Item name/ID label
