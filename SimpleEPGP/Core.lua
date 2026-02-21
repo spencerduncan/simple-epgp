@@ -54,6 +54,10 @@ local defaults = {
         announce_channel = "GUILD",
         announce_awards = true,
         announce_ep = true,
+
+        -- External players (pugs, allies, cross-realm)
+        -- Format: { ["Pugname"] = { class = "WARRIOR", ep = 0, gp = 0, modified_by = "OfficerName", modified_at = 1234567890 } }
+        external_players = {},
     },
 }
 
