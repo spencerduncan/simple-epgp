@@ -554,6 +554,17 @@ function EPGP:Decay()
         end
     end
 
+    -- Decay external players (no throttling needed — SavedVariables writes are instant)
+    local extPlayers = db.profile.external_players or {}
+    for _, data in pairs(extPlayers) do
+        if (data.ep or 0) > 0 or (data.gp or 0) > 0 then
+            data.ep = floor((data.ep or 0) * multiplier)
+            data.gp = floor((data.gp or 0) * multiplier)
+            data.modified_by = UnitName("player")
+            data.modified_at = time()
+        end
+    end
+
     local Log = SimpleEPGP:GetModule("Log", true)
     if Log then
         Log:Add("DECAY", nil, decayPercent, nil, decayPercent .. "% decay applied")
@@ -579,6 +590,7 @@ function EPGP:ResetAll()
         return false
     end
 
+    local db = SimpleEPGP.db
     local numMembers = GetNumGuildMembers()
     local writeDelay = 0
 
@@ -601,6 +613,15 @@ function EPGP:ResetAll()
                 writeDelay = writeDelay + 0.05
             end
         end
+    end
+
+    -- Reset external players (no throttling needed — SavedVariables writes are instant)
+    local extPlayers = db.profile.external_players or {}
+    for _, data in pairs(extPlayers) do
+        data.ep = 0
+        data.gp = 0
+        data.modified_by = UnitName("player")
+        data.modified_at = time()
     end
 
     local Log = SimpleEPGP:GetModule("Log", true)
