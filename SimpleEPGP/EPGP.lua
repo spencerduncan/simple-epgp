@@ -59,6 +59,11 @@ function EPGP:AddExternalPlayer(name, class)
     local db = SimpleEPGP.db
     if not db then return false end
 
+    -- Initialize external_players if missing (e.g., pre-existing SavedVariables)
+    if not db.profile.external_players then
+        db.profile.external_players = {}
+    end
+
     if db.profile.external_players[normalized] then
         SimpleEPGP:Print(normalized .. " is already in the external player list.")
         return false
@@ -90,12 +95,13 @@ function EPGP:RemoveExternalPlayer(name)
     local db = SimpleEPGP.db
     if not db then return false end
 
-    if not db.profile.external_players[normalized] then
+    local extPlayers = db.profile.external_players
+    if not extPlayers or not extPlayers[normalized] then
         SimpleEPGP:Print(normalized .. " is not in the external player list.")
         return false
     end
 
-    db.profile.external_players[normalized] = nil
+    extPlayers[normalized] = nil
 
     -- Rebuild standings to remove the external player
     self:GUILD_ROSTER_UPDATE()
@@ -118,7 +124,8 @@ function EPGP:IsExternalPlayer(name)
     local normalized = NormalizeName(name)
     local db = SimpleEPGP.db
     if not db then return false end
-    return db.profile.external_players[normalized] ~= nil
+    local extPlayers = db.profile.external_players
+    return extPlayers ~= nil and extPlayers[normalized] ~= nil
 end
 
 function EPGP:OnEnable()
@@ -323,7 +330,8 @@ function EPGP:ModifyEP(name, amount, reason)
         -- Not in guild roster — check external player DB
         local normalized = NormalizeName(name)
         local db = SimpleEPGP.db
-        local extPlayer = db and db.profile.external_players[normalized]
+        local extPlayers = db and db.profile.external_players
+        local extPlayer = extPlayers and extPlayers[normalized]
         if extPlayer then
             local ep = (extPlayer.ep or 0) + amount
             if ep < 0 then ep = 0 end
@@ -386,7 +394,8 @@ function EPGP:ModifyGP(name, amount, reason)
         -- Not in guild roster — check external player DB
         local normalized = NormalizeName(name)
         local db = SimpleEPGP.db
-        local extPlayer = db and db.profile.external_players[normalized]
+        local extPlayers = db and db.profile.external_players
+        local extPlayer = extPlayers and extPlayers[normalized]
         if extPlayer then
             local gp = (extPlayer.gp or 0) + amount
             if gp < 0 then gp = 0 end
