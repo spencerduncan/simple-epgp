@@ -17,6 +17,7 @@ function CreateFrame(frameType, name, parent, template)
         _children = {},
         -- Position/size
         SetPoint = function() end,
+        ClearAllPoints = function() end,
         SetSize = function() end,
         SetWidth = function() end,
         SetHeight = function() end,
