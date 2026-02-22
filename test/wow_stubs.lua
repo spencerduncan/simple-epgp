@@ -101,7 +101,7 @@ function CreateFrame(frameType, name, parent, template)
         GetFontString = function(self) return self end,
         SetNormalFontObject = function() end,
         SetFontObject = function() end,
-        -- Slider
+        -- Slider / StatusBar
         SetMinMaxValues = function() end,
         SetValue = function() end,
         GetValue = function() return 0 end,
@@ -109,6 +109,8 @@ function CreateFrame(frameType, name, parent, template)
         SetOrientation = function() end,
         SetObeyStepOnDrag = function() end,
         SetThumbTexture = function() end,
+        SetStatusBarTexture = function() end,
+        SetStatusBarColor = function() end,
         -- CheckButton
         SetChecked = function(self, val) self._checked = val end,
         GetChecked = function(self) return self._checked or false end,
