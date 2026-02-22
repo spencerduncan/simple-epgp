@@ -26,6 +26,7 @@ local playerDropdown
 local playerDropdownText
 local playerList = {}
 local selectedPlayer = nil
+local dropdownScrollOffset = 0
 
 -- Confirmation dialog state
 local pendingConfirmAction = nil
@@ -67,12 +68,50 @@ local function CreateDropdownMenu(parent)
     return menu
 end
 
+--- Update dropdown button visibility/positions based on current scroll offset.
+local function UpdateDropdownScroll()
+    if not dropdownMenu then return end
+
+    local rowH = 18
+    local maxVisible = 15
+    local count = #playerList
+
+    -- Clamp scroll offset to valid range
+    local maxOffset = count > maxVisible and (count - maxVisible) or 0
+    if dropdownScrollOffset < 0 then dropdownScrollOffset = 0 end
+    if dropdownScrollOffset > maxOffset then dropdownScrollOffset = maxOffset end
+
+    for i = 1, #dropdownMenu._buttons do
+        local btn = dropdownMenu._buttons[i]
+        local visibleIndex = i - dropdownScrollOffset
+        if visibleIndex >= 1 and visibleIndex <= maxVisible then
+            btn:SetPoint("TOPLEFT", 4, -(4 + (visibleIndex - 1) * rowH))
+            btn._label:SetText(playerList[i])
+            btn:Show()
+
+            local name = playerList[i]
+            btn:SetScript("OnClick", function()
+                selectedPlayer = name
+                if playerDropdownText then
+                    playerDropdownText:SetText(name)
+                end
+                dropdownMenu:Hide()
+            end)
+        else
+            btn:Hide()
+        end
+    end
+end
+
 local function ShowDropdownMenu(anchorFrame)
     RefreshPlayerList()
 
     if not dropdownMenu then
         dropdownMenu = CreateDropdownMenu(frame)
     end
+
+    -- Reset scroll offset when opening
+    dropdownScrollOffset = 0
 
     -- Clear old buttons
     for _, btn in ipairs(dropdownMenu._buttons) do
@@ -89,6 +128,7 @@ local function ShowDropdownMenu(anchorFrame)
     dropdownMenu:SetSize(menuWidth, menuHeight)
     dropdownMenu:SetPoint("TOPLEFT", anchorFrame, "BOTTOMLEFT", 0, -2)
 
+    -- Ensure buttons exist for all items
     for i = 1, count do
         local btn = dropdownMenu._buttons[i]
         if not btn then
@@ -103,20 +143,17 @@ local function ShowDropdownMenu(anchorFrame)
             btn._label:SetJustifyH("LEFT")
             dropdownMenu._buttons[i] = btn
         end
-
-        btn:SetPoint("TOPLEFT", 4, -(4 + (i - 1) * rowH))
-        btn._label:SetText(playerList[i])
-        btn:Show()
-
-        local name = playerList[i]
-        btn:SetScript("OnClick", function()
-            selectedPlayer = name
-            if playerDropdownText then
-                playerDropdownText:SetText(name)
-            end
-            dropdownMenu:Hide()
-        end)
     end
+
+    -- Enable mouse wheel scrolling on the dropdown menu
+    dropdownMenu:EnableMouseWheel(true)
+    dropdownMenu:SetScript("OnMouseWheel", function(_, delta)
+        dropdownScrollOffset = dropdownScrollOffset - delta
+        UpdateDropdownScroll()
+    end)
+
+    -- Show/position only the visible buttons
+    UpdateDropdownScroll()
 
     dropdownMenu:Show()
 end
@@ -614,4 +651,20 @@ end
 --- Check if the panel frame is shown (for testing).
 function OfficerPanel:IsShown()
     return frame and frame:IsShown() or false
+end
+
+--- Get the current dropdown scroll offset (for testing).
+function OfficerPanel:GetDropdownScrollOffset()
+    return dropdownScrollOffset
+end
+
+--- Set the dropdown scroll offset (for testing).
+function OfficerPanel:SetDropdownScrollOffset(offset)
+    dropdownScrollOffset = offset
+    UpdateDropdownScroll()
+end
+
+--- Get the dropdown menu frame (for testing).
+function OfficerPanel:GetDropdownMenu()
+    return dropdownMenu
 end
