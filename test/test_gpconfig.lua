@@ -265,11 +265,21 @@ describe("GPConfig module", function()
 
     it("can show and hide", function()
         GPConfig:Show()
+        local frame = _G["SimpleEPGPGPConfigFrame"]
+        assert.is_not_nil(frame, "Expected GPConfig frame to exist")
+        assert.is_true(frame:IsShown(), "Expected frame visible after Show()")
         GPConfig:Hide()
+        assert.is_false(frame:IsShown(), "Expected frame hidden after Hide()")
     end)
 
     it("can toggle", function()
         GPConfig:Toggle()
+        local frame = _G["SimpleEPGPGPConfigFrame"]
+        assert.is_not_nil(frame, "Expected GPConfig frame to exist")
+        local stateAfterFirst = frame:IsShown()
         GPConfig:Toggle()
+        local stateAfterSecond = frame:IsShown()
+        assert.are_not.equal(stateAfterFirst, stateAfterSecond,
+            "Expected toggle to change visibility state")
     end)
 end)

@@ -54,6 +54,9 @@ describe("Core", function()
         -- Reset GP config overrides
         SimpleEPGP.db.profile.slot_multipliers = {}
         SimpleEPGP.db.profile.item_overrides = {}
+
+        -- Clear print log for assertion checking
+        SimpleEPGP._printLog = {}
     end)
 
     describe("Initialization", function()
@@ -110,9 +113,13 @@ describe("Core", function()
             end)
 
             it("prints usage with missing args", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("ep")
                 SimpleEPGP:HandleSlashCommand("ep Player1")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Usage") then found = true; break end
+                end
+                assert.is_true(found, "Expected usage message in print log")
             end)
         end)
 
@@ -123,9 +130,13 @@ describe("Core", function()
             end)
 
             it("prints usage with missing args", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("gp")
                 SimpleEPGP:HandleSlashCommand("gp SomeName")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Usage") then found = true; break end
+                end
+                assert.is_true(found, "Expected usage message in print log")
             end)
         end)
 
@@ -154,8 +165,14 @@ describe("Core", function()
             end)
 
             it("confirm does nothing without pending action", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("confirm")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Nothing to confirm") then found = true; break end
+                end
+                assert.is_true(found, "Expected 'Nothing to confirm' message")
+                -- Values unchanged
+                assert.are.equal("5000,1000", _G._testGuildRoster[1].officerNote)
             end)
         end)
 
@@ -180,15 +197,30 @@ describe("Core", function()
             end)
 
             it("lists standby when empty", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("standby list")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("empty") then found = true; break end
+                end
+                assert.is_true(found, "Expected 'empty' in standby list output")
             end)
 
             it("lists standby with entries", function()
                 SimpleEPGP:HandleSlashCommand("standby add Player3")
                 SimpleEPGP:HandleSlashCommand("standby add Player4")
-                -- Should not error
+                SimpleEPGP._printLog = {}
                 SimpleEPGP:HandleSlashCommand("standby list")
+                local foundCount = false
+                local foundPlayer3 = false
+                local foundPlayer4 = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("2") then foundCount = true end
+                    if msg:find("Player3") then foundPlayer3 = true end
+                    if msg:find("Player4") then foundPlayer4 = true end
+                end
+                assert.is_true(foundCount, "Expected standby count in output")
+                assert.is_true(foundPlayer3, "Expected Player3 in standby list")
+                assert.is_true(foundPlayer4, "Expected Player4 in standby list")
             end)
         end)
 
@@ -197,14 +229,26 @@ describe("Core", function()
                 -- Generate some log entries via EP commands
                 SimpleEPGP:HandleSlashCommand("ep Player1 100 Test")
                 SimpleEPGP:HandleSlashCommand("ep Player2 50 Test2")
-                -- Should not error
+                SimpleEPGP._printLog = {}
                 SimpleEPGP:HandleSlashCommand("log")
-                SimpleEPGP:HandleSlashCommand("log 5")
+                local foundHeader = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Last") and msg:find("log entries") then
+                        foundHeader = true; break
+                    end
+                end
+                assert.is_true(foundHeader, "Expected 'Last N log entries' header")
+                -- Should have printed more than just the header (entries too)
+                assert.is_true(#SimpleEPGP._printLog >= 2, "Expected log entries in output")
             end)
 
             it("shows empty log message", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("log")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("No log entries") then found = true; break end
+                end
+                assert.is_true(found, "Expected 'No log entries' message")
             end)
         end)
 
@@ -248,10 +292,16 @@ describe("Core", function()
                 SimpleEPGP.db.profile.slot_multipliers = {}
             end)
 
-            it("lists all slots without error", function()
-                -- Should not error
+            it("lists all slots", function()
                 SimpleEPGP:HandleSlashCommand("slot list")
-                SimpleEPGP:HandleSlashCommand("slot")
+                local foundHeader = false
+                local foundSlot = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Slot multipliers") then foundHeader = true end
+                    if msg:find("INVTYPE_HEAD") then foundSlot = true end
+                end
+                assert.is_true(foundHeader, "Expected 'Slot multipliers' header")
+                assert.is_true(foundSlot, "Expected slot names in output")
             end)
 
             it("sets a slot override", function()
@@ -268,13 +318,21 @@ describe("Core", function()
             end)
 
             it("rejects unknown slots", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("slot INVTYPE_FAKE 1.0")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Unknown slot") then found = true; break end
+                end
+                assert.is_true(found, "Expected 'Unknown slot' message")
             end)
 
             it("shows current value for single slot", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("slot INVTYPE_HEAD")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("INVTYPE_HEAD") then found = true; break end
+                end
+                assert.is_true(found, "Expected slot name in output")
             end)
         end)
 
@@ -300,24 +358,45 @@ describe("Core", function()
 
             it("lists overrides", function()
                 SimpleEPGP:HandleSlashCommand("gpoverride 29759 500")
-                -- Should not error
+                SimpleEPGP._printLog = {}
                 SimpleEPGP:HandleSlashCommand("gpoverride list")
+                local foundHeader = false
+                local foundItem = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Item GP overrides") then foundHeader = true end
+                    if msg:find("500") and msg:find("GP") then foundItem = true end
+                end
+                assert.is_true(foundHeader, "Expected 'Item GP overrides' header")
+                assert.is_true(foundItem, "Expected override entry with 500 GP")
             end)
 
             it("lists empty overrides", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("gpoverride list")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("No item GP overrides") then found = true; break end
+                end
+                assert.is_true(found, "Expected 'No item GP overrides' message")
             end)
 
             it("prints usage with no args", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("gpoverride")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Usage") then found = true; break end
+                end
+                assert.is_true(found, "Expected usage message in print log")
             end)
 
             it("shows current override for specific item", function()
                 SimpleEPGP:HandleSlashCommand("gpoverride 29759 500")
-                -- Should not error
+                SimpleEPGP._printLog = {}
                 SimpleEPGP:HandleSlashCommand("gpoverride 29759")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("500") and msg:find("override") then found = true; break end
+                end
+                assert.is_true(found, "Expected override value in output")
             end)
         end)
 
@@ -373,12 +452,20 @@ describe("Core", function()
             it("handles uncached items by setting pending state", function()
                 -- Item ID 99999 is not in _testItemDB, so GetItemInfo returns nil
                 SimpleEPGP:HandleSlashCommand("loot 99999")
-                -- Session should NOT have been created yet
+                -- Session should NOT have been created
                 assert.is_nil(LootMaster.sessions[1])
-                -- Pending state should be set (but C_Timer.After fires immediately
-                -- in tests, so the timeout will have already cleaned it up)
-                -- The timeout fires immediately in test stubs, clearing the pending state
-                -- So we just verify no crash occurred
+                -- C_Timer.After fires immediately in test stubs, so the timeout
+                -- callback runs synchronously and cleans up the pending state.
+                -- Verify that the timeout message was printed.
+                local foundTimeout = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Timed out") or msg:find("not cached") then
+                        foundTimeout = true; break
+                    end
+                end
+                assert.is_true(foundTimeout, "Expected timeout or uncached message")
+                -- Pending state should be cleaned up by the timeout
+                assert.is_nil(SimpleEPGP._pendingLootItemID)
             end)
 
             it("resolves pending session on GET_ITEM_INFO_RECEIVED", function()
@@ -454,19 +541,37 @@ describe("Core", function()
 
         describe("/sepgp help and unknown", function()
             it("prints help", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("help")
+                local foundHeader = false
+                local foundCommand = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("SimpleEPGP") and msg:find("commands") then
+                        foundHeader = true
+                    end
+                    if msg:find("/sepgp ep") then foundCommand = true end
+                end
+                assert.is_true(foundHeader, "Expected help header with version")
+                assert.is_true(foundCommand, "Expected command listing in help")
             end)
 
             it("handles unknown commands", function()
-                -- Should not error
                 SimpleEPGP:HandleSlashCommand("nonexistent")
+                local found = false
+                for _, msg in ipairs(SimpleEPGP._printLog) do
+                    if msg:find("Unknown command") then found = true; break end
+                end
+                assert.is_true(found, "Expected 'Unknown command' message")
             end)
 
             it("handles empty input", function()
-                -- This would try to toggle Standings, but module has no frame in tests
-                -- UI modules are not loaded in this test, so we skip frame toggling
-                -- Just verify it doesn't crash
+                -- Empty input tries to toggle Standings, which is not loaded
+                -- in this test file — verify the expected module error
+                local ok, err = pcall(function()
+                    SimpleEPGP:HandleSlashCommand("")
+                end)
+                -- Standings module is not loaded, so this should error
+                assert.is_false(ok, "Expected error when Standings module is not loaded")
+                assert.is_truthy(err:find("Standings"), "Expected error to mention Standings")
             end)
         end)
     end)
