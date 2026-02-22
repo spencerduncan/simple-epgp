@@ -100,6 +100,42 @@ describe("Core", function()
         end)
     end)
 
+    describe("StripRealm", function()
+        it("strips realm suffix from a name", function()
+            assert.are.equal("Player", SimpleEPGP.StripRealm("Player-Dreamscythe"))
+        end)
+
+        it("returns name unchanged when no realm suffix", function()
+            assert.are.equal("Player", SimpleEPGP.StripRealm("Player"))
+        end)
+
+        it("returns nil for nil input", function()
+            assert.is_nil(SimpleEPGP.StripRealm(nil))
+        end)
+
+        it("returns empty string for empty string input", function()
+            assert.are.equal("", SimpleEPGP.StripRealm(""))
+        end)
+
+        it("handles names with special characters before dash", function()
+            assert.are.equal("Ärch", SimpleEPGP.StripRealm("Ärch-SomeRealm"))
+        end)
+
+        it("strips only the first dash (realm names can have hyphens)", function()
+            assert.are.equal("Player", SimpleEPGP.StripRealm("Player-Some-Realm"))
+        end)
+
+        it("handles single character names", function()
+            assert.are.equal("X", SimpleEPGP.StripRealm("X-Realm"))
+        end)
+
+        it("handles name that is just a dash", function()
+            -- Edge case: match returns "" or nil, fallback to original
+            local result = SimpleEPGP.StripRealm("-Realm")
+            assert.is_not_nil(result)
+        end)
+    end)
+
     describe("Slash commands", function()
         describe("/sepgp ep", function()
             it("awards EP to a player", function()

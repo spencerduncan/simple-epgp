@@ -1,6 +1,12 @@
 local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local AwardFrame = SimpleEPGP:NewModule("AwardFrame", "AceEvent-3.0")
 
+local function StripRealm(name)
+    if SimpleEPGP.StripRealm then return SimpleEPGP.StripRealm(name) end
+    if not name then return nil end
+    return name:match("^([^%-]+)") or name
+end
+
 local GetItemInfo = GetItemInfo
 local GetItemQualityColor = GetItemQualityColor
 local RAID_CLASS_COLORS = RAID_CLASS_COLORS
@@ -523,7 +529,7 @@ function AwardFrame:GetAutocompleteCandidates(text)
         for i = 1, numRaid do
             local name, _, _, _, class = GetRaidRosterInfo(i)
             if name then
-                local shortName = name:match("^([^%-]+)") or name
+                local shortName = StripRealm(name)
                 if not seen[shortName] then
                     local lowerName = strlower(shortName)
                     if strsub(lowerName, 1, #searchText) == searchText
