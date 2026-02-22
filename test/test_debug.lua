@@ -51,6 +51,9 @@ describe("Debug", function()
 
         -- Clear any pending item request from a previous test
         Debug._pendingItemID = nil
+
+        -- Clear print log for assertion checking
+        SimpleEPGP._printLog = {}
     end)
 
     describe("Logging", function()
@@ -122,15 +125,28 @@ describe("Debug", function()
             for i = 1, 5 do
                 Debug:Log("INFO", "entry " .. i)
             end
+            SimpleEPGP._printLog = {}
             Debug:CmdLog({ "debug", "log", "3" })
-            -- Should have printed to chat (via SimpleEPGP:Print)
-            -- We can't easily capture Print output, but at least verify no errors
+            local foundHeader = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Debug log") and msg:find("last") then
+                    foundHeader = true; break
+                end
+            end
+            assert.is_true(foundHeader, "Expected debug log header")
+            -- Header + 3 entries = at least 4 lines
+            assert.is_true(#SimpleEPGP._printLog >= 4,
+                "Expected at least 4 output lines (header + 3 entries)")
         end)
 
         it("handles empty log", function()
             _G.SimpleEPGPDebugLog = {}
             Debug:CmdLog({ "debug", "log" })
-            -- Should print "Debug log is empty."
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("empty") then found = true; break end
+            end
+            assert.is_true(found, "Expected 'Debug log is empty' message")
         end)
     end)
 
@@ -148,29 +164,61 @@ describe("Debug", function()
     end)
 
     describe("debug roster command", function()
-        it("runs without error", function()
+        it("prints guild roster with EP/GP info", function()
             Debug:CmdRoster()
-            -- Should print roster members with EP/GP
+            local foundHeader = false
+            local foundPlayer = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Guild roster") then foundHeader = true end
+                if msg:find("Player1") and msg:find("EP=") then foundPlayer = true end
+            end
+            assert.is_true(foundHeader, "Expected 'Guild roster' header")
+            assert.is_true(foundPlayer, "Expected player EP/GP info in output")
         end)
     end)
 
     describe("debug note command", function()
         it("prints officer note for a known player", function()
             Debug:CmdNote({ "debug", "note", "Player1" })
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Player1") and msg:find("officer note") then
+                    found = true; break
+                end
+            end
+            assert.is_true(found, "Expected Player1 officer note output")
         end)
 
         it("handles missing name arg", function()
             Debug:CmdNote({ "debug", "note" })
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Usage") then found = true; break end
+            end
+            assert.is_true(found, "Expected usage message for missing name")
         end)
 
         it("handles unknown player", function()
             Debug:CmdNote({ "debug", "note", "NonExistent" })
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("not found") then found = true; break end
+            end
+            assert.is_true(found, "Expected 'not found' message")
         end)
     end)
 
     describe("debug status command", function()
-        it("runs without error", function()
+        it("prints addon status information", function()
             Debug:CmdStatus()
+            local foundHeader = false
+            local foundConfig = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Debug Status") then foundHeader = true end
+                if msg:find("ep_per_boss") then foundConfig = true end
+            end
+            assert.is_true(foundHeader, "Expected 'Debug Status' header")
+            assert.is_true(foundConfig, "Expected config values in status output")
         end)
     end)
 
@@ -225,12 +273,23 @@ describe("Debug", function()
 
         it("prevents double activation", function()
             Debug:CmdFakeRaid()
+            SimpleEPGP._printLog = {}
             Debug:CmdFakeRaid()  -- Should print "already active"
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("already active") then found = true; break end
+            end
+            assert.is_true(found, "Expected 'already active' message on double activation")
             Debug:CmdEndFakeRaid()
         end)
 
         it("handles endfakeraid when not active", function()
-            Debug:CmdEndFakeRaid()  -- Should print "No fake raid is active."
+            Debug:CmdEndFakeRaid()
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("No fake raid") then found = true; break end
+            end
+            assert.is_true(found, "Expected 'No fake raid is active' message")
         end)
     end)
 
@@ -597,7 +656,11 @@ describe("Debug", function()
 
         it("rejects invalid bid types", function()
             Debug:CmdBid({ "debug", "bid", "INVALID" })
-            -- Should print usage
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Usage") then found = true; break end
+            end
+            assert.is_true(found, "Expected usage message for invalid bid type")
         end)
 
         it("handles no active session", function()
@@ -605,29 +668,59 @@ describe("Debug", function()
             local LootMaster = SimpleEPGP:GetModule("LootMaster")
             LootMaster.sessions = {}
             Debug:CmdBid({ "debug", "bid", "MS" })
-            -- Should print "No active loot session"
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("No active loot session") then found = true; break end
+            end
+            assert.is_true(found, "Expected 'No active loot session' message")
         end)
     end)
 
     describe("HandleCommand routing", function()
         it("routes log subcommand", function()
             Debug:HandleCommand({ "debug", "log" })
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Debug log") then found = true; break end
+            end
+            assert.is_true(found, "Expected debug log output from log subcommand")
         end)
 
         it("routes clear subcommand", function()
+            Debug:Log("INFO", "test entry")
             Debug:HandleCommand({ "debug", "clear" })
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("cleared") then found = true; break end
+            end
+            assert.is_true(found, "Expected 'cleared' message from clear subcommand")
         end)
 
         it("routes help for unknown subcommand", function()
             Debug:HandleCommand({ "debug", "unknown" })
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Debug commands") then found = true; break end
+            end
+            assert.is_true(found, "Expected help output for unknown subcommand")
         end)
 
         it("routes help with no subcommand", function()
             Debug:HandleCommand({ "debug" })
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Debug commands") then found = true; break end
+            end
+            assert.is_true(found, "Expected help output when no subcommand given")
         end)
 
         it("routes status subcommand", function()
             Debug:HandleCommand({ "debug", "status" })
+            local found = false
+            for _, msg in ipairs(SimpleEPGP._printLog) do
+                if msg:find("Debug Status") then found = true; break end
+            end
+            assert.is_true(found, "Expected status output from status subcommand")
         end)
     end)
 
