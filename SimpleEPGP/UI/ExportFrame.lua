@@ -16,9 +16,10 @@ local activeTab = "standings"
 local function BuildStandingsCSV()
     local EPGP = SimpleEPGP:GetModule("EPGP")
     local standings = EPGP:GetStandings()
-    local lines = { "Name,Class,EP,GP,PR" }
+    local lines = { "Name,Class,EP,GP,PR,Source" }
     for _, s in ipairs(standings) do
-        lines[#lines + 1] = format("%s,%s,%d,%d,%.2f", s.name, s.class, s.ep, s.gp, s.pr)
+        local source = s.isExternal and "external" or "guild"
+        lines[#lines + 1] = format("%s,%s,%d,%d,%.2f,%s", s.name, s.class, s.ep, s.gp, s.pr, source)
     end
     return tconcat(lines, "\n")
 end
@@ -190,4 +191,10 @@ function ExportFrame:Toggle()
     else
         self:Show()
     end
+end
+
+--- Get the standings CSV text (for testing).
+-- @return string CSV content with header and data rows
+function ExportFrame:GetStandingsCSV()
+    return BuildStandingsCSV()
 end

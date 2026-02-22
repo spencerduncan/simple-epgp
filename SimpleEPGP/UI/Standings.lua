@@ -94,12 +94,16 @@ local function UpdateRows()
             local entry = sortedData[dataIndex]
             row:Show()
 
-            -- Name colored by class
+            -- Name colored by class, with external player indicator
+            local displayName = entry.name
+            if entry.isExternal then
+                displayName = displayName .. " *"
+            end
             local classColor = RAID_CLASS_COLORS[entry.class]
             if classColor then
-                row.name:SetText("|c" .. classColor.colorStr .. entry.name .. "|r")
+                row.name:SetText("|c" .. classColor.colorStr .. displayName .. "|r")
             else
-                row.name:SetText(entry.name)
+                row.name:SetText(displayName)
             end
 
             row.class:SetText(entry.class)
@@ -107,20 +111,18 @@ local function UpdateRows()
             row.gp:SetText(tostring(entry.gp))
             row.pr:SetText(format("%.2f", entry.pr))
 
-            -- Grey out players below min EP threshold
+            -- Grey out players below min EP threshold; reduce alpha for external
+            local alpha = 1.0
             if entry.ep < minEP then
-                row.name:SetAlpha(0.5)
-                row.class:SetAlpha(0.5)
-                row.ep:SetAlpha(0.5)
-                row.gp:SetAlpha(0.5)
-                row.pr:SetAlpha(0.5)
-            else
-                row.name:SetAlpha(1.0)
-                row.class:SetAlpha(1.0)
-                row.ep:SetAlpha(1.0)
-                row.gp:SetAlpha(1.0)
-                row.pr:SetAlpha(1.0)
+                alpha = 0.5
+            elseif entry.isExternal then
+                alpha = 0.8
             end
+            row.name:SetAlpha(alpha)
+            row.class:SetAlpha(alpha)
+            row.ep:SetAlpha(alpha)
+            row.gp:SetAlpha(alpha)
+            row.pr:SetAlpha(alpha)
         else
             row:Hide()
         end

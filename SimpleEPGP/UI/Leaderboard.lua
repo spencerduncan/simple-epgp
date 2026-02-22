@@ -537,14 +537,18 @@ function Leaderboard:Refresh()
                 row.rank:SetTextColor(0.8, 0.8, 0.8)
             end
 
-            -- Class-colored name
+            -- Class-colored name, with external player indicator
+            local displayName = entry.name
+            if entry.isExternal then
+                displayName = displayName .. " *"
+            end
             local classColor = RAID_CLASS_COLORS[entry.class]
             if classColor then
                 row.name:SetTextColor(classColor.r, classColor.g, classColor.b)
             else
                 row.name:SetTextColor(1, 1, 1)
             end
-            row.name:SetText(entry.name)
+            row.name:SetText(displayName)
 
             -- EP, GP, PR
             row.ep:SetText(tostring(entry.ep))
@@ -563,6 +567,10 @@ function Leaderboard:Refresh()
             else
                 row.highlight:Hide()
             end
+
+            -- Slightly reduce alpha for external players
+            local rowAlpha = entry.isExternal and 0.8 or 1.0
+            row:SetAlpha(rowAlpha)
 
             row:Show()
             yPos = yPos + ROW_HEIGHT
