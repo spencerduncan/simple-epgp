@@ -297,32 +297,24 @@ local function OnScrollChanged(_, value)
     Leaderboard:Refresh()
 end
 
+local Utils = SimpleEPGP.UI.Utils
+
+local LEADERBOARD_BACKDROP = {
+    bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+    edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+    tile = true, tileSize = 32, edgeSize = 32,
+    insets = { left = 8, right = 8, top = 8, bottom = 8 },
+}
+
 local function CreateLeaderboardFrame()
-    local f = CreateFrame("Frame", "SimpleEPGPLeaderboard", UIParent, "BackdropTemplate")
-    f:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    f:SetPoint("CENTER")
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetFrameStrata("DIALOG")
-
-    f:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    local f = Utils.CreateStandardFrame({
+        name = "SimpleEPGPLeaderboard",
+        width = FRAME_WIDTH,
+        height = FRAME_HEIGHT,
+        title = "SimpleEPGP Leaderboard",
+        titleFont = "GameFontNormalLarge",
+        backdrop = LEADERBOARD_BACKDROP,
     })
-
-    -- Title
-    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    f.title:SetPoint("TOP", f, "TOP", 0, -12)
-    f.title:SetText("SimpleEPGP Leaderboard")
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
 
     -- Filter buttons (row 1)
     f.btnAll = CreateFilterButton(f, "All Members", "all", 12, -30)
@@ -382,39 +374,18 @@ local function CreateLeaderboardFrame()
     end
 
     -- Scroll bar (plain Slider, same pattern as Standings.lua)
-    local scrollBar = CreateFrame("Slider", "SimpleEPGPLeaderboardScrollBar", f)
-    scrollBar:SetPoint("TOPRIGHT", -10, -(CONTROLS_HEIGHT + 4))
-    scrollBar:SetPoint("BOTTOMRIGHT", -10, 12)
-    scrollBar:SetWidth(12)
-    scrollBar:SetOrientation("VERTICAL")
-    scrollBar:SetMinMaxValues(0, 1)
-    scrollBar:SetValueStep(1)
-    scrollBar:SetObeyStepOnDrag(true)
-    scrollBar:SetValue(0)
-
-    local track = scrollBar:CreateTexture(nil, "BACKGROUND")
-    track:SetAllPoints()
-    track:SetColorTexture(0.1, 0.1, 0.1, 0.3)
-
-    local thumb = scrollBar:CreateTexture(nil, "OVERLAY")
-    thumb:SetSize(12, 40)
-    thumb:SetColorTexture(0.5, 0.5, 0.5, 0.6)
-    scrollBar:SetThumbTexture(thumb)
-
-    scrollBar:SetScript("OnValueChanged", OnScrollChanged)
+    local scrollBar = Utils.CreateScrollbar({
+        parent = f,
+        name = "SimpleEPGPLeaderboardScrollBar",
+        topOffset = -(CONTROLS_HEIGHT + 4),
+        bottomOffset = 12,
+        onChange = OnScrollChanged,
+    })
     f.scrollBar = scrollBar
 
     -- Mouse wheel scrolling
-    f:EnableMouseWheel(true)
-    f:SetScript("OnMouseWheel", function(_, delta)
-        local current = scrollBar:GetValue()
-        scrollBar:SetValue(current - delta * 3)
-    end)
+    Utils.EnableMouseWheelScroll(f, scrollBar)
 
-    -- Escape-to-close
-    tinsert(UISpecialFrames, "SimpleEPGPLeaderboard")
-
-    f:Hide()
     return f
 end
 

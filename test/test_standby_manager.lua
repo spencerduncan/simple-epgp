@@ -36,6 +36,7 @@ SimpleEPGP.db = LibStub("AceDB-3.0"):New("SimpleEPGPDB", {
 }, true)
 
 -- Load the StandbyManager module
+dofile("SimpleEPGP/UI/Utils.lua")
 dofile("SimpleEPGP/UI/StandbyManager.lua")
 
 -- Initialize addon (triggers OnInitialize + OnEnable for addon and all modules)

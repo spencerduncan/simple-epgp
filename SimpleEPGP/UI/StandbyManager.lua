@@ -6,7 +6,6 @@ local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local StandbyManager = SimpleEPGP:NewModule("StandbyManager", "AceEvent-3.0")
 
 local ipairs = ipairs
-local tinsert = table.insert
 local tremove = table.remove
 
 -- Constants
@@ -158,34 +157,16 @@ end
 -- Frame creation (lazy, one-time)
 --------------------------------------------------------------------------------
 
+local Utils = SimpleEPGP.UI.Utils
+
 local function CreateFrame_()
-    frame = CreateFrame("Frame", "SimpleEPGPStandbyFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("DIALOG")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetClampedToScreen(true)
-
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    frame = Utils.CreateStandardFrame({
+        name = "SimpleEPGPStandbyFrame",
+        width = FRAME_WIDTH,
+        height = FRAME_HEIGHT,
+        title = "Standby List",
+        onClose = function() StandbyManager:Hide() end,
     })
-
-    -- Title
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", 0, -12)
-    title:SetText("Standby List")
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -2, -2)
-    closeBtn:SetScript("OnClick", function() StandbyManager:Hide() end)
 
     -- Count label
     frame.countLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -252,44 +233,20 @@ local function CreateFrame_()
     end
 
     -- Scroll bar
-    local scrollBar = CreateFrame("Slider", "SimpleEPGPStandbyScrollBar", frame)
-    scrollBar:SetPoint("TOPRIGHT", -10, -HEADER_HEIGHT)
-    scrollBar:SetPoint("BOTTOMRIGHT", -10, 40)
-    scrollBar:SetWidth(12)
-    scrollBar:SetOrientation("VERTICAL")
-    scrollBar:SetMinMaxValues(0, 1)
-    scrollBar:SetValueStep(1)
-    scrollBar:SetObeyStepOnDrag(true)
-    scrollBar:SetValue(0)
-
-    -- Track background
-    local track = scrollBar:CreateTexture(nil, "BACKGROUND")
-    track:SetAllPoints()
-    track:SetColorTexture(0.1, 0.1, 0.1, 0.3)
-
-    -- Thumb texture
-    local thumb = scrollBar:CreateTexture(nil, "OVERLAY")
-    thumb:SetSize(12, 40)
-    thumb:SetColorTexture(0.5, 0.5, 0.5, 0.6)
-    scrollBar:SetThumbTexture(thumb)
-
-    scrollBar:SetScript("OnValueChanged", function(_, value)
-        scrollOffset = math.floor(value)
-        RefreshDisplay()
-    end)
+    local scrollBar = Utils.CreateScrollbar({
+        parent = frame,
+        name = "SimpleEPGPStandbyScrollBar",
+        topOffset = -HEADER_HEIGHT,
+        bottomOffset = 40,
+        onChange = function(_, value)
+            scrollOffset = math.floor(value)
+            RefreshDisplay()
+        end,
+    })
     frame.scrollBar = scrollBar
 
     -- Mouse wheel scrolling
-    frame:EnableMouseWheel(true)
-    frame:SetScript("OnMouseWheel", function(_, delta)
-        local current = scrollBar:GetValue()
-        scrollBar:SetValue(current - delta * 3)
-    end)
-
-    -- Escape to close
-    tinsert(UISpecialFrames, "SimpleEPGPStandbyFrame")
-
-    frame:Hide()
+    Utils.EnableMouseWheelScroll(frame, scrollBar)
 end
 
 --------------------------------------------------------------------------------

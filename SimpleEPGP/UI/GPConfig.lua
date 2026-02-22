@@ -340,36 +340,18 @@ end
 -- Frame Construction
 --------------------------------------------------------------------------------
 
+local Utils = SimpleEPGP.UI.Utils
+
 local function CreateFrame_()
     local GPCalc = SimpleEPGP:GetModule("GPCalc")
 
-    frame = CreateFrame("Frame", "SimpleEPGPGPConfigFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("DIALOG")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetClampedToScreen(true)
-
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    frame = Utils.CreateStandardFrame({
+        name = "SimpleEPGPGPConfigFrame",
+        width = FRAME_WIDTH,
+        height = FRAME_HEIGHT,
+        title = "GP Configuration",
+        onClose = function() GPConfig:Hide() end,
     })
-
-    -- Title
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", 0, -12)
-    title:SetText("GP Configuration")
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -2, -2)
-    closeBtn:SetScript("OnClick", function() GPConfig:Hide() end)
 
     -- ScrollFrame
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame)
@@ -382,35 +364,18 @@ local function CreateFrame_()
     scrollFrame:SetScrollChild(content)
 
     -- Scroll bar
-    local scrollBar = CreateFrame("Slider", nil, frame)
-    scrollBar:SetPoint("TOPRIGHT", -10, -32)
-    scrollBar:SetPoint("BOTTOMRIGHT", -10, 44)
-    scrollBar:SetWidth(12)
-    scrollBar:SetOrientation("VERTICAL")
+    local scrollBar = Utils.CreateScrollbar({
+        parent = frame,
+        topOffset = -32,
+        bottomOffset = 44,
+        onChange = function(_, value)
+            scrollFrame:SetVerticalScroll(value)
+        end,
+    })
     local maxScroll = math.max(0, totalContentHeight - (FRAME_HEIGHT - 76))
     scrollBar:SetMinMaxValues(0, maxScroll)
-    scrollBar:SetValueStep(1)
-    scrollBar:SetObeyStepOnDrag(true)
-    scrollBar:SetValue(0)
 
-    local sTrack = scrollBar:CreateTexture(nil, "BACKGROUND")
-    sTrack:SetAllPoints()
-    sTrack:SetColorTexture(0.1, 0.1, 0.1, 0.3)
-
-    local sThumb = scrollBar:CreateTexture(nil, "OVERLAY")
-    sThumb:SetSize(12, 40)
-    sThumb:SetColorTexture(0.5, 0.5, 0.5, 0.6)
-    scrollBar:SetThumbTexture(sThumb)
-
-    scrollBar:SetScript("OnValueChanged", function(_, value)
-        scrollFrame:SetVerticalScroll(value)
-    end)
-
-    frame:EnableMouseWheel(true)
-    frame:SetScript("OnMouseWheel", function(_, delta)
-        local current = scrollBar:GetValue()
-        scrollBar:SetValue(current - delta * 20)
-    end)
+    Utils.EnableMouseWheelScroll(frame, scrollBar, 20)
 
     -- Build content
     local y = -10
@@ -608,10 +573,6 @@ local function CreateFrame_()
         GPConfig:Hide()
     end)
 
-    -- Escape to close
-    table.insert(UISpecialFrames, "SimpleEPGPGPConfigFrame")
-
-    frame:Hide()
 end
 
 function GPConfig:Show()

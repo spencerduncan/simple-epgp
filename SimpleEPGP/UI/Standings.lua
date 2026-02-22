@@ -201,34 +201,17 @@ local function RefreshDisplay()
     UpdateRows()
 end
 
+local Utils = SimpleEPGP.UI.Utils
+
 local function CreateFrame_()
-    frame = CreateFrame("Frame", "SimpleEPGPStandingsFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("HIGH")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetClampedToScreen(true)
-
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    frame = Utils.CreateStandardFrame({
+        name = "SimpleEPGPStandingsFrame",
+        width = FRAME_WIDTH,
+        height = FRAME_HEIGHT,
+        title = "SimpleEPGP Standings",
+        strata = "HIGH",
+        onClose = function() Standings:Hide() end,
     })
-
-    -- Title
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", 0, -12)
-    title:SetText("SimpleEPGP Standings")
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -2, -2)
-    closeBtn:SetScript("OnClick", function() Standings:Hide() end)
 
     -- "Current Raid" filter checkbox
     local raidFilter = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
@@ -298,41 +281,17 @@ local function CreateFrame_()
 
     -- Scroll bar (plain Slider — no template, avoids UIPanelScrollBarTemplate
     -- which requires a parent ScrollFrame with SetVerticalScroll on modern client)
-    local scrollBar = CreateFrame("Slider", "SimpleEPGPStandingsScrollBar", frame)
-    scrollBar:SetPoint("TOPRIGHT", -10, -(30 + HEADER_HEIGHT + 4))
-    scrollBar:SetPoint("BOTTOMRIGHT", -10, 12)
-    scrollBar:SetWidth(12)
-    scrollBar:SetOrientation("VERTICAL")
-    scrollBar:SetMinMaxValues(0, 1)
-    scrollBar:SetValueStep(1)
-    scrollBar:SetObeyStepOnDrag(true)
-    scrollBar:SetValue(0)
-
-    -- Track background
-    local track = scrollBar:CreateTexture(nil, "BACKGROUND")
-    track:SetAllPoints()
-    track:SetColorTexture(0.1, 0.1, 0.1, 0.3)
-
-    -- Thumb texture
-    local thumb = scrollBar:CreateTexture(nil, "OVERLAY")
-    thumb:SetSize(12, 40)
-    thumb:SetColorTexture(0.5, 0.5, 0.5, 0.6)
-    scrollBar:SetThumbTexture(thumb)
-
-    scrollBar:SetScript("OnValueChanged", OnScrollChanged)
+    local scrollBar = Utils.CreateScrollbar({
+        parent = frame,
+        name = "SimpleEPGPStandingsScrollBar",
+        topOffset = -(30 + HEADER_HEIGHT + 4),
+        bottomOffset = 12,
+        onChange = OnScrollChanged,
+    })
     frame.scrollBar = scrollBar
 
     -- Mouse wheel scrolling on the content area
-    frame:EnableMouseWheel(true)
-    frame:SetScript("OnMouseWheel", function(_, delta)
-        local current = scrollBar:GetValue()
-        scrollBar:SetValue(current - delta * 3)
-    end)
-
-    -- Escape to close
-    table.insert(UISpecialFrames, "SimpleEPGPStandingsFrame")
-
-    frame:Hide()
+    Utils.EnableMouseWheelScroll(frame, scrollBar)
 end
 
 function Standings:OnEnable()
