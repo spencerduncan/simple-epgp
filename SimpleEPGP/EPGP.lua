@@ -150,10 +150,23 @@ function EPGP:SetExternalPlayerValues(name, ep, gp)
         return false
     end
 
+    local oldEP = extPlayers[normalized].ep or 0
+    local oldGP = extPlayers[normalized].gp or 0
     extPlayers[normalized].ep = ep
     extPlayers[normalized].gp = gp
     extPlayers[normalized].modified_by = UnitName("player")
     extPlayers[normalized].modified_at = time()
+
+    -- Audit log — record the change so it appears in /sepgp log
+    local Log = SimpleEPGP:GetModule("Log", true)
+    if Log then
+        if ep ~= oldEP then
+            Log:Add("EP", normalized, ep - oldEP, nil, "Set external EP to " .. ep)
+        end
+        if gp ~= oldGP then
+            Log:Add("GP", normalized, gp - oldGP, nil, "Set external GP to " .. gp)
+        end
+    end
 
     -- Rebuild standings to reflect new values
     self:GUILD_ROSTER_UPDATE()
