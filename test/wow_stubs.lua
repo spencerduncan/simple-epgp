@@ -497,11 +497,13 @@ _G.C_ChatInfo = {
 }
 
 -- Captured chat messages for test verification
+-- SendChatMessage(msg, chatType, language, target) — target used for WHISPER
 _G._testChatMessages = {}
-_G.SendChatMessage = function(text, channel, ...)
+_G.SendChatMessage = function(text, channel, language, target)
     _G._testChatMessages[#_G._testChatMessages + 1] = {
         text = text,
         channel = channel,
+        target = target,
     }
 end
 
