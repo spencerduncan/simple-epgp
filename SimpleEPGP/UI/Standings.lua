@@ -1,6 +1,12 @@
 local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local Standings = SimpleEPGP:NewModule("Standings", "AceEvent-3.0")
 
+local function StripRealm(name)
+    if SimpleEPGP.StripRealm then return SimpleEPGP.StripRealm(name) end
+    if not name then return nil end
+    return name:match("^([^%-]+)") or name
+end
+
 local ipairs = ipairs
 local floor = math.floor
 local format = string.format
@@ -41,7 +47,7 @@ local function GetRaidMemberNames()
     for i = 1, numRaid do
         local name = GetRaidRosterInfo(i)
         if name then
-            local shortName = name:match("^([^%-]+)") or name
+            local shortName = StripRealm(name)
             names[shortName] = true
         end
     end

@@ -15,6 +15,15 @@ local SendChatMessage = SendChatMessage
 local IsInRaid = IsInRaid
 local GetItemInfo = GetItemInfo
 
+--- Strip realm suffix from a player name.
+-- WoW sends "Name-Realm" for cross-realm players; this returns just "Name".
+-- @param name string|nil Player name, possibly with realm suffix
+-- @return string|nil The name without realm suffix, or nil if input is nil
+function SimpleEPGP.StripRealm(name)
+    if not name then return nil end
+    return name:match("^([^%-]+)") or name
+end
+
 -- Pending confirmation state for dangerous commands (decay, reset)
 local pendingAction = nil
 

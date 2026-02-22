@@ -1,6 +1,13 @@
 local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local EPGP = SimpleEPGP:NewModule("EPGP", "AceEvent-3.0")
 
+-- Local reference to StripRealm (defined in Core.lua, loaded before EPGP.lua)
+local StripRealm = function(name)
+    if SimpleEPGP.StripRealm then return SimpleEPGP.StripRealm(name) end
+    if not name then return nil end
+    return name:match("^([^%-]+)") or name
+end
+
 local floor = math.floor
 local tonumber = tonumber
 local tostring = tostring
@@ -226,7 +233,7 @@ function EPGP:GUILD_ROSTER_UPDATE()
         local name, _, _, _, _, _, _, officerNote, _, _, class = GetGuildRosterInfo(i)
         if name then
             -- Strip realm suffix for consistency
-            local shortName = name:match("^([^%-]+)") or name
+            local shortName = StripRealm(name)
             local ep, gp = self:ParseNote(officerNote or "")
             ep = ep or 0
             gp = gp or 0
@@ -367,7 +374,7 @@ local function FindRosterIndex(name)
     for i = 1, numMembers do
         local rosterName = GetGuildRosterInfo(i)
         if rosterName then
-            local shortName = rosterName:match("^([^%-]+)") or rosterName
+            local shortName = StripRealm(rosterName)
             if shortName == normalized then
                 return i
             end
@@ -511,7 +518,7 @@ function EPGP:MassEP(amount, reason)
     for i = 1, numRaid do
         local name = GetRaidRosterInfo(i)
         if name then
-            local shortName = name:match("^([^%-]+)") or name
+            local shortName = StripRealm(name)
             local index = FindRosterIndex(shortName)
             if index then
                 self:ModifyNote(index, amount, 0)
@@ -596,8 +603,8 @@ function EPGP:Decay()
                     -- Re-verify the roster index is still the same player
                     local checkName = GetGuildRosterInfo(rosterIndex)
                     if checkName then
-                        local checkShort = checkName:match("^([^%-]+)") or checkName
-                        local nameShort = name:match("^([^%-]+)") or name
+                        local checkShort = StripRealm(checkName)
+                        local nameShort = StripRealm(name)
                         if checkShort == nameShort then
                             GuildRosterSetOfficerNote(rosterIndex, newNote)
                         end
@@ -657,8 +664,8 @@ function EPGP:ResetAll()
                 C_Timer.After(writeDelay, function()
                     local checkName = GetGuildRosterInfo(rosterIndex)
                     if checkName then
-                        local checkShort = checkName:match("^([^%-]+)") or checkName
-                        local nameShort = name:match("^([^%-]+)") or name
+                        local checkShort = StripRealm(checkName)
+                        local nameShort = StripRealm(name)
                         if checkShort == nameShort then
                             GuildRosterSetOfficerNote(rosterIndex, "0,0")
                         end

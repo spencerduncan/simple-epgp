@@ -7,6 +7,12 @@
 local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local Debug = SimpleEPGP:NewModule("Debug", "AceEvent-3.0")
 
+local function StripRealm(name)
+    if SimpleEPGP.StripRealm then return SimpleEPGP.StripRealm(name) end
+    if not name then return nil end
+    return name:match("^([^%-]+)") or name
+end
+
 local time = time
 local ipairs = ipairs
 local tostring = tostring
@@ -196,7 +202,7 @@ function Debug:CmdNote(args)
     for i = 1, numMembers do
         local rosterName, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
         if rosterName then
-            local shortName = rosterName:match("^([^%-]+)") or rosterName
+            local shortName = StripRealm(rosterName)
             if shortName == name then
                 SimpleEPGP:Print(name .. " officer note: " .. (officerNote or "(empty)"))
                 return
@@ -450,7 +456,7 @@ function Debug:CmdViewCheck()
     for i = 1, math.min(numMembers, 5) do
         local name, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(i)
         if name then
-            local shortName = name:match("^([^%-]+)") or name
+            local shortName = StripRealm(name)
             local display = officerNote
             if display == nil then
                 display = "(nil)"

@@ -3,6 +3,12 @@ local Comms = SimpleEPGP:NewModule("Comms", "AceComm-3.0", "AceSerializer-3.0")
 
 local COMM_PREFIX = "SimpleEPGP"
 
+local function StripRealm(name)
+    if SimpleEPGP.StripRealm then return SimpleEPGP.StripRealm(name) end
+    if not name then return nil end
+    return name:match("^([^%-]+)") or name
+end
+
 -- Callback registry: messageType -> {handler1, handler2, ...}
 local callbacks = {}
 
@@ -31,13 +37,6 @@ local function FireCallbacks(messageType, sender, data)
     for i = 1, #handlers do
         handlers[i](sender, data)
     end
-end
-
---- Strip realm name from sender. WoW sends "Name-Realm" for cross-realm,
---- but in same-realm context we just want "Name".
-local function StripRealm(sender)
-    local name = sender:match("^([^%-]+)")
-    return name or sender
 end
 
 --- Handle incoming comm messages. Deserializes and dispatches to callbacks.

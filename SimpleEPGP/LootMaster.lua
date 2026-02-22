@@ -1,6 +1,12 @@
 local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local LootMaster = SimpleEPGP:NewModule("LootMaster", "AceEvent-3.0")
 
+local function StripRealm(name)
+    if SimpleEPGP.StripRealm then return SimpleEPGP.StripRealm(name) end
+    if not name then return nil end
+    return name:match("^([^%-]+)") or name
+end
+
 -- GetLootMethod() moved to C_PartyInfo.GetLootMethod() in TBC Anniversary.
 -- The new API returns Enum.LootMethod integers instead of strings.
 local GetLootMethod = GetLootMethod
@@ -357,7 +363,7 @@ function LootMaster:GiveLootToPlayer(itemLink, playerName)
                 local candidateName = GetMasterLootCandidate(lootSlot, candidateIdx)
                 if candidateName then
                     -- Strip realm from candidate name for comparison
-                    local cleanName = candidateName:match("^([^%-]+)") or candidateName
+                    local cleanName = StripRealm(candidateName)
                     if cleanName == playerName then
                         GiveMasterLoot(lootSlot, candidateIdx)
                         return
