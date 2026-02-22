@@ -54,6 +54,8 @@ local defaults = {
         announce_channel = "GUILD",
         announce_awards = true,
         announce_ep = true,
+        announce_loot_rw = true,
+        announce_awards_raid = true,
 
         -- External players (pugs, allies, cross-realm)
         -- Format: { ["Pugname"] = { class = "WARRIOR", ep = 0, gp = 0, modified_by = "OfficerName", modified_at = 1234567890 } }
@@ -480,19 +482,12 @@ function SimpleEPGP:CmdExternal(args)
             return
         end
 
-        local baseGP = self.db.profile.base_gp or 100
-        local minEP = self.db.profile.min_ep or 0
-
         self:Print("External players (" .. #names .. "):")
         for _, extName in ipairs(names) do
             local data = extPlayers[extName]
             local ep = data.ep or 0
             local gp = data.gp or 0
-            local effectiveGP = math.max(gp, 0) + baseGP
-            local pr = 0
-            if ep >= minEP and effectiveGP > 0 then
-                pr = ep / effectiveGP
-            end
+            local pr = EPGP:CalculatePR(ep, gp)
             self:Print(string.format("  %s (%s) — EP: %d  GP: %d  PR: %.2f",
                 extName, data.class or "?", ep, gp, pr))
         end

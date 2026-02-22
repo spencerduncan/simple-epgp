@@ -215,9 +215,6 @@ function EPGP:GUILD_ROSTER_UPDATE()
 
     local Debug = SimpleEPGP:GetModule("Debug", true)
 
-    local baseGP = db.profile.base_gp or 1
-    local minEP = db.profile.min_ep or 0
-
     local newStandings = {}
     local newLookup = {}
     local numMembers = GetNumGuildMembers()
@@ -234,19 +231,13 @@ function EPGP:GUILD_ROSTER_UPDATE()
             ep = ep or 0
             gp = gp or 0
 
-            local effectiveGP = math.max(gp, 0) + baseGP
-            local pr = 0
-            if ep >= minEP and effectiveGP > 0 then
-                pr = ep / effectiveGP
-            end
-
             local entry = {
                 name = shortName,
                 fullName = name,
                 class = class,
                 ep = ep,
                 gp = gp,
-                pr = pr,
+                pr = self:CalculatePR(ep, gp),
                 rosterIndex = i,
             }
             newStandings[#newStandings + 1] = entry
@@ -261,18 +252,13 @@ function EPGP:GUILD_ROSTER_UPDATE()
         if not newLookup[extName] then
             local ep = extData.ep or 0
             local gp = extData.gp or 0
-            local effectiveGP = math.max(gp, 0) + baseGP
-            local pr = 0
-            if ep >= minEP and effectiveGP > 0 then
-                pr = ep / effectiveGP
-            end
 
             local entry = {
                 name = extName,
                 class = extData.class,
                 ep = ep,
                 gp = gp,
-                pr = pr,
+                pr = self:CalculatePR(ep, gp),
                 isExternal = true,
                 -- External players do NOT have rosterIndex
             }
@@ -322,6 +308,40 @@ end
 -- @return Encoded string "EP,GP".
 function EPGP:EncodeNote(ep, gp)
     return tostring(floor(ep)) .. "," .. tostring(floor(gp))
+end
+
+--- Calculate Priority Rating from EP and GP values.
+-- Uses base_gp and min_ep from the addon's saved config.
+-- @param ep Effort points (number).
+-- @param gp Gear points (number).
+-- @return PR value (number). Returns 0 if EP is below min_ep.
+function EPGP:CalculatePR(ep, gp)
+    local db = SimpleEPGP.db
+    local baseGP = db.profile.base_gp or 1
+    local minEP = db.profile.min_ep or 0
+    local effectiveGP = math.max(gp, 0) + baseGP
+    if ep >= minEP and effectiveGP > 0 then
+        return ep / effectiveGP
+    end
+    return 0
+end
+
+--- Read, modify, and write back a guild member's officer note.
+-- Handles the full read-modify-write cycle for EP/GP adjustments:
+-- reads the officer note, parses EP/GP, adds the deltas, floors to 0,
+-- encodes and writes back.
+-- @param rosterIndex Guild roster index for the member.
+-- @param epDelta Amount to add to EP (can be negative).
+-- @param gpDelta Amount to add to GP (can be negative).
+-- @return newEP, newGP after modification.
+function EPGP:ModifyNote(rosterIndex, epDelta, gpDelta)
+    local _, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(rosterIndex)
+    local ep, gp = self:ParseNote(officerNote or "")
+    ep = math.max((ep or 0) + epDelta, 0)
+    gp = math.max((gp or 0) + gpDelta, 0)
+    local newNote = self:EncodeNote(ep, gp)
+    GuildRosterSetOfficerNote(rosterIndex, newNote)
+    return ep, gp
 end
 
 --- Get the cached standings table (array of {name, class, ep, gp, pr}).
@@ -398,16 +418,7 @@ function EPGP:ModifyEP(name, amount, reason)
         return false
     end
 
-    local _, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(index)
-    local ep, gp = self:ParseNote(officerNote or "")
-    ep = (ep or 0) + amount
-    gp = gp or 0
-
-    -- EP cannot go below 0
-    if ep < 0 then ep = 0 end
-
-    local newNote = self:EncodeNote(ep, gp)
-    GuildRosterSetOfficerNote(index, newNote)
+    self:ModifyNote(index, amount, 0)
 
     -- Log the change
     local Log = SimpleEPGP:GetModule("Log", true)
@@ -462,16 +473,7 @@ function EPGP:ModifyGP(name, amount, reason)
         return false
     end
 
-    local _, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(index)
-    local ep, gp = self:ParseNote(officerNote or "")
-    ep = ep or 0
-    gp = (gp or 0) + amount
-
-    -- GP cannot go below 0
-    if gp < 0 then gp = 0 end
-
-    local newNote = self:EncodeNote(ep, gp)
-    GuildRosterSetOfficerNote(index, newNote)
+    self:ModifyNote(index, 0, amount)
 
     local Log = SimpleEPGP:GetModule("Log", true)
     if Log then
@@ -512,11 +514,7 @@ function EPGP:MassEP(amount, reason)
             local shortName = name:match("^([^%-]+)") or name
             local index = FindRosterIndex(shortName)
             if index then
-                local _, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(index)
-                local ep, gp = self:ParseNote(officerNote or "")
-                ep = (ep or 0) + amount
-                gp = gp or 0
-                GuildRosterSetOfficerNote(index, self:EncodeNote(ep, gp))
+                self:ModifyNote(index, amount, 0)
                 awarded = awarded + 1
             elseif self:IsExternalPlayer(shortName) then
                 -- External player in raid but not in guild — award EP to SavedVariables
@@ -538,11 +536,7 @@ function EPGP:MassEP(amount, reason)
             for _, standbyName in ipairs(db.standby) do
                 local index = FindRosterIndex(standbyName)
                 if index then
-                    local _, _, _, _, _, _, _, officerNote = GetGuildRosterInfo(index)
-                    local ep, gp = self:ParseNote(officerNote or "")
-                    ep = (ep or 0) + standbyAmount
-                    gp = gp or 0
-                    GuildRosterSetOfficerNote(index, self:EncodeNote(ep, gp))
+                    self:ModifyNote(index, standbyAmount, 0)
                 elseif self:IsExternalPlayer(standbyName) then
                     -- External player on standby — award standby EP to SavedVariables
                     local normalized = NormalizeName(standbyName)
@@ -933,28 +927,19 @@ function EPGP:OnStandingsSync(sender, data)
     -- the officer's base_gp value (not the local default).
     self:ApplyReceivedConfig(data.config)
 
-    local db = SimpleEPGP.db
-    local baseGP = db.profile.base_gp or 1
-    local minEP = db.profile.min_ep or 0
-
     local newStandings = {}
     local newLookup = {}
 
     for _, entry in ipairs(data.standings) do
         local ep = entry.e or 0
         local gp = entry.g or 0
-        local effectiveGP = math.max(gp, 0) + baseGP
-        local pr = 0
-        if ep >= minEP and effectiveGP > 0 then
-            pr = ep / effectiveGP
-        end
 
         local record = {
             name = entry.n,
             class = entry.c,
             ep = ep,
             gp = gp,
-            pr = pr,
+            pr = self:CalculatePR(ep, gp),
             rosterIndex = nil,  -- not available from sync
         }
         newStandings[#newStandings + 1] = record
