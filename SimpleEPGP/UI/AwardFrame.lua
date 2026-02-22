@@ -4,11 +4,16 @@ local AwardFrame = SimpleEPGP:NewModule("AwardFrame", "AceEvent-3.0")
 local GetItemInfo = GetItemInfo
 local GetItemQualityColor = GetItemQualityColor
 local RAID_CLASS_COLORS = RAID_CLASS_COLORS
+local GetRaidRosterInfo = GetRaidRosterInfo
+local GetNumGroupMembers = GetNumGroupMembers
+local IsInRaid = IsInRaid
 local time = time
 local floor = math.floor
 local format = string.format
 local pairs = pairs
 local ipairs = ipairs
+local strlower = string.lower
+local strsub = string.sub
 
 -- Main frame (created lazily)
 local awardFrame
@@ -18,6 +23,15 @@ local activeSessionId
 local selectedBidder  -- {name, bidType}
 -- Bid refresh ticker
 local bidRefreshTicker
+-- Autocomplete state
+local MAX_AUTOCOMPLETE_RESULTS = 8
+local AUTOCOMPLETE_ROW_HEIGHT = 18
+local manualBidType = "MS"
+local autocompleteHighlightIndex = 0
+local autocompleteResults = {}
+
+-- Forward declaration (defined after PopulateBidSection)
+local RefreshBidDisplay
 
 --------------------------------------------------------------------------------
 -- Confirmation Dialog
@@ -65,6 +79,30 @@ local SECTION_BACKDROP = {
     edgeSize = 12,
     insets = { left = 3, right = 3, top = 3, bottom = 3 },
 }
+
+--------------------------------------------------------------------------------
+-- Button State Colors
+--------------------------------------------------------------------------------
+
+local COLOR_ENABLED = { r = 1.0, g = 0.82, b = 0.0 }    -- Gold (normal WoW)
+local COLOR_DISABLED = { r = 0.5, g = 0.5, b = 0.5 }     -- Gray
+local COLOR_AWARD = { r = 0.2, g = 1.0, b = 0.2 }        -- Green for award
+local COLOR_CANCEL = { r = 1.0, g = 0.3, b = 0.3 }       -- Red for cancel
+
+--- Apply colored text to a button based on enabled state and optional color override.
+local function StyleButton(btn, enabled, color)
+    btn:SetEnabled(enabled)
+    local fontString = btn:GetFontString()
+    if fontString and fontString.SetTextColor then
+        if enabled and color then
+            fontString:SetTextColor(color.r, color.g, color.b)
+        elseif enabled then
+            fontString:SetTextColor(COLOR_ENABLED.r, COLOR_ENABLED.g, COLOR_ENABLED.b)
+        else
+            fontString:SetTextColor(COLOR_DISABLED.r, COLOR_DISABLED.g, COLOR_DISABLED.b)
+        end
+    end
+end
 
 --------------------------------------------------------------------------------
 -- Item Button Creation
@@ -176,12 +214,89 @@ local function CreateBidSection(parent, title, yOffset)
 end
 
 --------------------------------------------------------------------------------
+-- Autocomplete Dropdown Creation
+--------------------------------------------------------------------------------
+
+local function CreateAutocompleteRow(parent, index)
+    local row = CreateFrame("Button", nil, parent)
+    row:SetSize(200, AUTOCOMPLETE_ROW_HEIGHT)
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 2, -2 - (index - 1) * AUTOCOMPLETE_ROW_HEIGHT)
+
+    -- Class color bar
+    local classBar = row:CreateTexture(nil, "ARTWORK")
+    classBar:SetSize(3, AUTOCOMPLETE_ROW_HEIGHT - 2)
+    classBar:SetPoint("LEFT", row, "LEFT", 1, 0)
+    row.classBar = classBar
+
+    -- Name text
+    local nameText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    nameText:SetPoint("LEFT", classBar, "RIGHT", 4, 0)
+    nameText:SetWidth(190)
+    nameText:SetJustifyH("LEFT")
+    row.nameText = nameText
+
+    -- Highlight texture (for keyboard navigation)
+    local highlight = row:CreateTexture(nil, "BACKGROUND")
+    highlight:SetAllPoints()
+    highlight:SetColorTexture(0.3, 0.5, 1.0, 0.3)
+    highlight:Hide()
+    row.highlight = highlight
+
+    -- Mouse hover highlight
+    local hoverHL = row:CreateTexture(nil, "HIGHLIGHT")
+    hoverHL:SetAllPoints()
+    hoverHL:SetColorTexture(1, 1, 1, 0.1)
+
+    return row
+end
+
+local function CreateAutocompleteDropdown(parent)
+    local dropdown = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    dropdown:SetSize(206, 10)  -- Width matches editbox; height set dynamically
+    dropdown:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", 0, -2)
+    dropdown:SetFrameStrata("TOOLTIP")
+    dropdown:SetBackdrop(SECTION_BACKDROP)
+    dropdown:SetBackdropColor(0.1, 0.1, 0.1, 0.95)
+    dropdown:SetBackdropBorderColor(0.4, 0.4, 0.4, 1.0)
+    dropdown:Hide()
+
+    dropdown.rows = {}
+    for i = 1, MAX_AUTOCOMPLETE_RESULTS do
+        local row = CreateAutocompleteRow(dropdown, i)
+        row:Hide()
+        dropdown.rows[i] = row
+    end
+
+    return dropdown
+end
+
+--------------------------------------------------------------------------------
+-- Bid Type Toggle Buttons
+--------------------------------------------------------------------------------
+
+local function CreateBidTypeButton(parent, label, xOffset)
+    local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    btn:SetSize(32, 20)
+    btn:SetPoint("LEFT", parent, "RIGHT", xOffset, 0)
+    btn:SetText(label)
+
+    -- Selection indicator
+    local selTex = btn:CreateTexture(nil, "BACKGROUND")
+    selTex:SetAllPoints()
+    selTex:SetColorTexture(0.2, 0.6, 1.0, 0.3)
+    selTex:Hide()
+    btn.selTex = selTex
+
+    return btn
+end
+
+--------------------------------------------------------------------------------
 -- Frame Creation (lazy)
 --------------------------------------------------------------------------------
 
 local function CreateAwardFrame()
     local f = CreateFrame("Frame", "SimpleEPGPAwardFrame", UIParent, "BackdropTemplate")
-    f:SetSize(500, 450)
+    f:SetSize(500, 490)
     f:SetPoint("CENTER", UIParent, "CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetBackdrop(BACKDROP_INFO)
@@ -231,11 +346,93 @@ local function CreateAwardFrame()
     f.osSection = CreateBidSection(bidArea, "Off Spec", -110)
     f.deSection = CreateBidSection(bidArea, "Disenchant", -210)
 
+    -- Manual award area (between bid area and bottom controls)
+    local manualLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    manualLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 14, 70)
+    manualLabel:SetText("Manual:")
+    manualLabel:SetTextColor(0.8, 0.8, 0.8)
+    f.manualLabel = manualLabel
+
+    -- Player search editbox
+    local searchBox = CreateFrame("EditBox", "SimpleEPGPSearchBox", f, "InputBoxTemplate")
+    searchBox:SetSize(200, 20)
+    searchBox:SetPoint("LEFT", manualLabel, "RIGHT", 6, 0)
+    searchBox:SetAutoFocus(false)
+    searchBox:SetMaxLetters(50)
+    f.searchBox = searchBox
+
+    -- Autocomplete dropdown
+    local dropdown = CreateAutocompleteDropdown(searchBox)
+    f.autocompleteDropdown = dropdown
+
+    -- Bid type toggle buttons (MS / OS / DE) for manual awards
+    local msBtn = CreateBidTypeButton(searchBox, "MS", 8)
+    local osBtn = CreateBidTypeButton(searchBox, "OS", 44)
+    local deBtn = CreateBidTypeButton(searchBox, "DE", 80)
+    f.bidTypeMS = msBtn
+    f.bidTypeOS = osBtn
+    f.bidTypeDE = deBtn
+
+    -- Wire up bid type button clicks
+    local function UpdateBidTypeButtons()
+        f.bidTypeMS.selTex:SetShown(manualBidType == "MS")
+        f.bidTypeOS.selTex:SetShown(manualBidType == "OS")
+        f.bidTypeDE.selTex:SetShown(manualBidType == "DE")
+        -- Update selectedBidder's bidType if it was set via autocomplete
+        if selectedBidder and selectedBidder.isManual then
+            selectedBidder.bidType = manualBidType
+            AwardFrame:UpdateButtonStates()
+        end
+    end
+
+    msBtn:SetScript("OnClick", function()
+        manualBidType = "MS"
+        UpdateBidTypeButtons()
+    end)
+    osBtn:SetScript("OnClick", function()
+        manualBidType = "OS"
+        UpdateBidTypeButtons()
+    end)
+    deBtn:SetScript("OnClick", function()
+        manualBidType = "DE"
+        UpdateBidTypeButtons()
+    end)
+
+    -- Default selection indicator
+    msBtn.selTex:Show()
+
+    -- Wire up editbox scripts
+    searchBox:SetScript("OnTextChanged", function(self)
+        AwardFrame:OnSearchTextChanged(self:GetText())
+    end)
+    searchBox:SetScript("OnEnterPressed", function()
+        AwardFrame:OnSearchEnterPressed()
+    end)
+    searchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+        AwardFrame:HideAutocomplete()
+    end)
+    searchBox:SetScript("OnKeyDown", function(self, key)
+        if key == "DOWN" then
+            AwardFrame:OnSearchArrowKey(1)
+        elseif key == "UP" then
+            AwardFrame:OnSearchArrowKey(-1)
+        end
+    end)
+
+    -- Status text (above buttons)
+    local statusText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    statusText:SetPoint("BOTTOM", f, "BOTTOM", 0, 55)
+    statusText:SetTextColor(0.7, 0.7, 0.7)
+    statusText:SetText("Select an item to begin")
+    f.statusText = statusText
+
     -- Bottom controls area
     -- Start Bidding button
     local startBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     startBtn:SetSize(120, 24)
-    startBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, 38)
+    startBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, 28)
     startBtn:SetText("Start Bidding")
     startBtn:SetScript("OnClick", function()
         AwardFrame:OnStartBidding()
@@ -256,7 +453,7 @@ local function CreateAwardFrame()
     -- Award button
     local awardBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     awardBtn:SetSize(160, 24)
-    awardBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 38)
+    awardBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 28)
     awardBtn:SetText("Award")
     awardBtn:SetEnabled(false)
     awardBtn:SetScript("OnClick", function()
@@ -283,6 +480,201 @@ local function CreateAwardFrame()
     f.timerText = timerText
 
     return f
+end
+
+--------------------------------------------------------------------------------
+-- Autocomplete Logic
+--------------------------------------------------------------------------------
+
+--- Get autocomplete candidates matching the given text.
+-- Sources: EPGP standings + current raid members.
+-- @param text string The search text (case-insensitive matching).
+-- @return array of {name, class} entries, max MAX_AUTOCOMPLETE_RESULTS.
+function AwardFrame:GetAutocompleteCandidates(text)
+    if not text or text == "" then
+        return {}
+    end
+
+    local searchText = strlower(text)
+    local seen = {}
+    local candidates = {}
+
+    -- Source 1: EPGP standings
+    local EPGP = SimpleEPGP:GetModule("EPGP")
+    local standings = EPGP:GetStandings()
+    for i = 1, #standings do
+        local entry = standings[i]
+        if entry.name and not seen[entry.name] then
+            local lowerName = strlower(entry.name)
+            if strsub(lowerName, 1, #searchText) == searchText
+                or lowerName:find(searchText, 1, true) then
+                seen[entry.name] = true
+                candidates[#candidates + 1] = {
+                    name = entry.name,
+                    class = entry.class or "UNKNOWN",
+                }
+            end
+        end
+    end
+
+    -- Source 2: Current raid members (may include players not in standings)
+    if IsInRaid() then
+        local numRaid = GetNumGroupMembers()
+        for i = 1, numRaid do
+            local name, _, _, _, class = GetRaidRosterInfo(i)
+            if name then
+                local shortName = name:match("^([^%-]+)") or name
+                if not seen[shortName] then
+                    local lowerName = strlower(shortName)
+                    if strsub(lowerName, 1, #searchText) == searchText
+                        or lowerName:find(searchText, 1, true) then
+                        seen[shortName] = true
+                        candidates[#candidates + 1] = {
+                            name = shortName,
+                            class = class or "UNKNOWN",
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    -- Sort alphabetically
+    table.sort(candidates, function(a, b) return a.name < b.name end)
+
+    -- Limit to max results
+    if #candidates > MAX_AUTOCOMPLETE_RESULTS then
+        local trimmed = {}
+        for i = 1, MAX_AUTOCOMPLETE_RESULTS do
+            trimmed[i] = candidates[i]
+        end
+        return trimmed
+    end
+
+    return candidates
+end
+
+--- Refresh the autocomplete dropdown with current results.
+local function RefreshAutocompleteDropdown()
+    if not awardFrame then return end
+
+    local dropdown = awardFrame.autocompleteDropdown
+    local count = #autocompleteResults
+
+    if count == 0 then
+        dropdown:Hide()
+        return
+    end
+
+    -- Size the dropdown to fit results
+    dropdown:SetHeight(count * AUTOCOMPLETE_ROW_HEIGHT + 4)
+
+    for i, row in ipairs(dropdown.rows) do
+        local candidate = autocompleteResults[i]
+        if candidate then
+            local cc = RAID_CLASS_COLORS[candidate.class]
+            if cc then
+                row.classBar:SetColorTexture(cc.r, cc.g, cc.b)
+                row.nameText:SetTextColor(cc.r, cc.g, cc.b)
+            else
+                row.classBar:SetColorTexture(0.5, 0.5, 0.5)
+                row.nameText:SetTextColor(1, 1, 1)
+            end
+            row.nameText:SetText(candidate.name)
+
+            -- Keyboard highlight
+            if i == autocompleteHighlightIndex then
+                row.highlight:Show()
+            else
+                row.highlight:Hide()
+            end
+
+            row.candidateData = candidate
+            row:SetScript("OnClick", function(self)
+                AwardFrame:SelectAutocompletePlayer(self.candidateData.name, self.candidateData.class)
+            end)
+            row:Show()
+        else
+            row:Hide()
+            row.candidateData = nil
+        end
+    end
+
+    dropdown:Show()
+end
+
+function AwardFrame:HideAutocomplete()
+    autocompleteResults = {}
+    autocompleteHighlightIndex = 0
+    if awardFrame and awardFrame.autocompleteDropdown then
+        awardFrame.autocompleteDropdown:Hide()
+    end
+end
+
+function AwardFrame:OnSearchTextChanged(text)
+    if not text or text == "" then
+        self:HideAutocomplete()
+        return
+    end
+
+    autocompleteResults = self:GetAutocompleteCandidates(text)
+    autocompleteHighlightIndex = 0
+    RefreshAutocompleteDropdown()
+end
+
+function AwardFrame:OnSearchEnterPressed()
+    if autocompleteHighlightIndex > 0 and autocompleteResults[autocompleteHighlightIndex] then
+        local candidate = autocompleteResults[autocompleteHighlightIndex]
+        self:SelectAutocompletePlayer(candidate.name, candidate.class)
+    elseif #autocompleteResults == 1 then
+        -- Auto-select if exactly one match
+        local candidate = autocompleteResults[1]
+        self:SelectAutocompletePlayer(candidate.name, candidate.class)
+    end
+end
+
+function AwardFrame:OnSearchArrowKey(direction)
+    if #autocompleteResults == 0 then return end
+
+    autocompleteHighlightIndex = autocompleteHighlightIndex + direction
+    if autocompleteHighlightIndex < 1 then
+        autocompleteHighlightIndex = #autocompleteResults
+    elseif autocompleteHighlightIndex > #autocompleteResults then
+        autocompleteHighlightIndex = 1
+    end
+
+    RefreshAutocompleteDropdown()
+end
+
+--- Select a player from autocomplete for manual award.
+-- @param name string Player name
+-- @param class string WoW class token
+function AwardFrame:SelectAutocompletePlayer(name, class)
+    -- Look up real EP/GP/PR if available
+    local EPGP = SimpleEPGP:GetModule("EPGP")
+    local playerInfo = EPGP:GetPlayerInfo(name)
+
+    selectedBidder = {
+        name = name,
+        class = class,
+        bidType = manualBidType,
+        ep = playerInfo and playerInfo.ep or 0,
+        gp = playerInfo and playerInfo.gp or 0,
+        pr = playerInfo and playerInfo.pr or 0,
+        isManual = true,  -- Flag indicating this was a manual selection
+    }
+
+    -- Update UI
+    if awardFrame then
+        awardFrame.searchBox:SetText(name)
+        awardFrame.searchBox:ClearFocus()
+    end
+    self:HideAutocomplete()
+    self:UpdateButtonStates()
+    -- Also refresh bid display to clear any bid-row selection highlighting
+    if activeSessionId then
+        RefreshBidDisplay()
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -367,8 +759,10 @@ local function PopulateBidSection(section, bids)
             end)
             row:Show()
 
-            -- Show selection state
-            if selectedBidder and selectedBidder.name == bid.name and selectedBidder.bidType == bid.bidType then
+            -- Show selection state (only if not a manual/autocomplete selection)
+            if selectedBidder and not selectedBidder.isManual
+                and selectedBidder.name == bid.name
+                and selectedBidder.bidType == bid.bidType then
                 row.selected:Show()
             else
                 row.selected:Hide()
@@ -380,7 +774,7 @@ local function PopulateBidSection(section, bids)
     end
 end
 
-local function RefreshBidDisplay()
+RefreshBidDisplay = function()
     if not awardFrame or not activeSessionId then return end
 
     local LootMaster = SimpleEPGP:GetModule("LootMaster")
@@ -391,13 +785,54 @@ local function RefreshBidDisplay()
     PopulateBidSection(awardFrame.osSection, bids.os)
     PopulateBidSection(awardFrame.deSection, bids.de)
 
-    -- Update award button text
-    if selectedBidder then
-        awardFrame.awardBtn:SetText(format("Award to %s", selectedBidder.name))
-        awardFrame.awardBtn:SetEnabled(true)
-    else
+    AwardFrame:UpdateButtonStates()
+end
+
+--------------------------------------------------------------------------------
+-- Button State Management
+--------------------------------------------------------------------------------
+
+--- Centralized button state update. Called whenever state changes.
+function AwardFrame:UpdateButtonStates()
+    if not awardFrame then return end
+
+    local hasItem = selectedItemIndex ~= nil
+    local hasSession = activeSessionId ~= nil
+    local hasBidder = selectedBidder ~= nil
+
+    if not hasItem then
+        -- No item selected
+        StyleButton(awardFrame.startBtn, false)
+        StyleButton(awardFrame.cancelBtn, false)
+        StyleButton(awardFrame.awardBtn, false)
         awardFrame.awardBtn:SetText("Award")
-        awardFrame.awardBtn:SetEnabled(false)
+        awardFrame.statusText:SetText("Select an item to begin")
+    elseif not hasSession then
+        -- Item selected but no session
+        StyleButton(awardFrame.startBtn, true)
+        StyleButton(awardFrame.cancelBtn, false)
+        StyleButton(awardFrame.awardBtn, false)
+        awardFrame.awardBtn:SetText("Award")
+        awardFrame.statusText:SetText("Click Start Bidding to open bids")
+    elseif not hasBidder then
+        -- Session active, no bidder selected
+        StyleButton(awardFrame.startBtn, false)
+        StyleButton(awardFrame.cancelBtn, true, COLOR_CANCEL)
+        StyleButton(awardFrame.awardBtn, false)
+        awardFrame.awardBtn:SetText("Award")
+        awardFrame.statusText:SetText("Waiting for bids... Select a bidder or use manual award")
+    else
+        -- Session active, bidder selected
+        StyleButton(awardFrame.startBtn, false)
+        StyleButton(awardFrame.cancelBtn, true, COLOR_CANCEL)
+        StyleButton(awardFrame.awardBtn, true, COLOR_AWARD)
+        awardFrame.awardBtn:SetText(format("Award to %s", selectedBidder.name))
+        local bidLabel = selectedBidder.bidType or "?"
+        if selectedBidder.isManual then
+            awardFrame.statusText:SetText(format("Manual award: %s (%s)", selectedBidder.name, bidLabel))
+        else
+            awardFrame.statusText:SetText(format("Selected: %s (%s bid)", selectedBidder.name, bidLabel))
+        end
     end
 end
 
@@ -414,6 +849,12 @@ function AwardFrame:SelectItem(index)
     selectedBidder = nil
     selectedItemIndex = index
 
+    -- Clear autocomplete search
+    if awardFrame and awardFrame.searchBox then
+        awardFrame.searchBox:SetText("")
+    end
+    self:HideAutocomplete()
+
     -- Check if a session exists for this item
     local LootMaster = SimpleEPGP:GetModule("LootMaster")
     -- Sessions are tracked by ID; find if one matches this itemLink
@@ -424,8 +865,7 @@ function AwardFrame:SelectItem(index)
                 self:StartBidRefresh()
                 self:StartTimerBar(session)
                 RefreshBidDisplay()
-                awardFrame.startBtn:SetEnabled(false)
-                awardFrame.cancelBtn:SetEnabled(true)
+                self:UpdateButtonStates()
                 return
             end
         end
@@ -435,16 +875,22 @@ function AwardFrame:SelectItem(index)
     activeSessionId = nil
     self:StopBidRefresh()
     self:ClearBidDisplay()
-    awardFrame.startBtn:SetEnabled(true)
-    awardFrame.cancelBtn:SetEnabled(false)
-    awardFrame.awardBtn:SetEnabled(false)
-    awardFrame.awardBtn:SetText("Award")
+    self:UpdateButtonStates()
     awardFrame.timerBar:SetValue(0)
     awardFrame.timerText:SetText("")
 end
 
 function AwardFrame:SelectBidder(bidder)
     selectedBidder = bidder
+    -- Clear manual selection flag since this is from bid list
+    if selectedBidder then
+        selectedBidder.isManual = false
+    end
+    -- Clear autocomplete search box
+    if awardFrame and awardFrame.searchBox then
+        awardFrame.searchBox:SetText("")
+    end
+    self:HideAutocomplete()
     RefreshBidDisplay()
 end
 
@@ -463,8 +909,7 @@ function AwardFrame:OnStartBidding()
     end
 
     self:StartBidRefresh()
-    awardFrame.startBtn:SetEnabled(false)
-    awardFrame.cancelBtn:SetEnabled(true)
+    self:UpdateButtonStates()
 end
 
 function AwardFrame:OnCancelSession()
@@ -475,10 +920,7 @@ function AwardFrame:OnCancelSession()
     selectedBidder = nil
     self:StopBidRefresh()
     self:ClearBidDisplay()
-    awardFrame.startBtn:SetEnabled(true)
-    awardFrame.cancelBtn:SetEnabled(false)
-    awardFrame.awardBtn:SetEnabled(false)
-    awardFrame.awardBtn:SetText("Award")
+    self:UpdateButtonStates()
     awardFrame.timerBar:SetValue(0)
     awardFrame.timerText:SetText("")
 end
@@ -493,7 +935,7 @@ function AwardFrame:OnAwardClick()
     local GPCalc = SimpleEPGP:GetModule("GPCalc")
     local gpCharged = GPCalc:GetBidGP(session.itemLink, selectedBidder.bidType) or 0
 
-    -- Show confirmation dialog — pass data table as 4th arg so OnShow/OnAccept can access it
+    -- Show confirmation dialog -- pass data table as 4th arg so OnShow/OnAccept can access it
     local data = {
         sessionId = activeSessionId,
         name = selectedBidder.name,
@@ -572,14 +1014,25 @@ function AwardFrame:ShowLoot(items)
     activeSessionId = nil
     selectedBidder = nil
     selectedItemIndex = nil
+    manualBidType = "MS"
 
     RefreshItemButtons()
     self:ClearBidDisplay()
 
-    awardFrame.startBtn:SetEnabled(false)
-    awardFrame.cancelBtn:SetEnabled(false)
-    awardFrame.awardBtn:SetEnabled(false)
-    awardFrame.awardBtn:SetText("Award")
+    -- Reset autocomplete
+    if awardFrame.searchBox then
+        awardFrame.searchBox:SetText("")
+    end
+    self:HideAutocomplete()
+
+    -- Reset bid type buttons
+    if awardFrame.bidTypeMS then
+        awardFrame.bidTypeMS.selTex:Show()
+        awardFrame.bidTypeOS.selTex:Hide()
+        awardFrame.bidTypeDE.selTex:Hide()
+    end
+
+    self:UpdateButtonStates()
     awardFrame.timerBar:SetValue(0)
     awardFrame.timerText:SetText("")
     awardFrame:SetScript("OnUpdate", nil)
@@ -598,6 +1051,52 @@ function AwardFrame:OnTimerExpired(sessionId, winner)
     if winner then
         self:SelectBidder(winner)
     end
+end
+
+--------------------------------------------------------------------------------
+-- Test Accessors
+--------------------------------------------------------------------------------
+
+--- Get the current frame reference (for tests).
+function AwardFrame:GetFrame()
+    return awardFrame
+end
+
+--- Get the current manual bid type (for tests).
+function AwardFrame:GetManualBidType()
+    return manualBidType
+end
+
+--- Set the manual bid type (for tests).
+function AwardFrame:SetManualBidType(bidType)
+    manualBidType = bidType
+end
+
+--- Get the current selected bidder (for tests).
+function AwardFrame:GetSelectedBidder()
+    return selectedBidder
+end
+
+--- Get the active session ID (for tests).
+function AwardFrame:GetActiveSessionId()
+    return activeSessionId
+end
+
+--- Set the active session ID (for tests).
+function AwardFrame:SetActiveSessionId(id)
+    activeSessionId = id
+end
+
+--- Get the selected item index (for tests).
+function AwardFrame:GetSelectedItemIndex()
+    return selectedItemIndex
+end
+
+--- Set eligible items and selected index (for tests).
+function AwardFrame:SetTestState(items, itemIndex, sessionId)
+    eligibleItems = items or {}
+    selectedItemIndex = itemIndex
+    activeSessionId = sessionId
 end
 
 --------------------------------------------------------------------------------
