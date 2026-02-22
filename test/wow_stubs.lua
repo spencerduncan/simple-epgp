@@ -111,7 +111,7 @@ function CreateFrame(frameType, name, parent, template)
         SetThumbTexture = function() end,
         -- CheckButton
         SetChecked = function(self, val) self._checked = val end,
-        IsChecked = function(self) return self._checked or false end,
+        GetChecked = function(self) return self._checked or false end,
         -- Mouse wheel
         EnableMouseWheel = function() end,
         -- Dragging
