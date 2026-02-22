@@ -128,6 +128,51 @@ function EPGP:IsExternalPlayer(name)
     return extPlayers ~= nil and extPlayers[normalized] ~= nil
 end
 
+--- Directly set EP and GP values for an external player.
+-- Unlike ModifyEP/ModifyGP which add/subtract, this overwrites the values.
+-- @param name Player name (will be normalized).
+-- @param ep New EP value (must be >= 0).
+-- @param gp New GP value (must be >= 0).
+-- @return true on success, false if not an external player.
+function EPGP:SetExternalPlayerValues(name, ep, gp)
+    if not name or name == "" then
+        SimpleEPGP:Print("Cannot set values: name is required.")
+        return false
+    end
+
+    local normalized = NormalizeName(name)
+    local db = SimpleEPGP.db
+    if not db then return false end
+
+    local extPlayers = db.profile.external_players
+    if not extPlayers or not extPlayers[normalized] then
+        SimpleEPGP:Print(normalized .. " is not in the external player list.")
+        return false
+    end
+
+    local oldEP = extPlayers[normalized].ep or 0
+    local oldGP = extPlayers[normalized].gp or 0
+    extPlayers[normalized].ep = ep
+    extPlayers[normalized].gp = gp
+    extPlayers[normalized].modified_by = UnitName("player")
+    extPlayers[normalized].modified_at = time()
+
+    -- Audit log — record the change so it appears in /sepgp log
+    local Log = SimpleEPGP:GetModule("Log", true)
+    if Log then
+        if ep ~= oldEP then
+            Log:Add("EP", normalized, ep - oldEP, nil, "Set external EP to " .. ep)
+        end
+        if gp ~= oldGP then
+            Log:Add("GP", normalized, gp - oldGP, nil, "Set external GP to " .. gp)
+        end
+    end
+
+    -- Rebuild standings to reflect new values
+    self:GUILD_ROSTER_UPDATE()
+    return true
+end
+
 function EPGP:OnEnable()
     if not IsInGuild() then return end
     self:RegisterEvent("GUILD_ROSTER_UPDATE")

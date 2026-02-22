@@ -154,6 +154,8 @@ function SimpleEPGP:HandleSlashCommand(input)
         self:CmdDecay()
     elseif cmd == "confirm" then
         self:CmdConfirm()
+    elseif cmd == "external" or cmd == "ext" then
+        self:CmdExternal(args)
     elseif cmd == "standby" then
         self:CmdStandby(args)
     elseif cmd == "slot" then
@@ -398,6 +400,130 @@ function SimpleEPGP:CmdStandby(args)
 
     else
         self:Print("Usage: /sepgp standby add|remove|clear|list [name]")
+    end
+end
+
+--------------------------------------------------------------------------------
+-- /sepgp external add|remove|list|set
+--------------------------------------------------------------------------------
+
+-- Valid WoW class tokens for external player validation
+local VALID_CLASSES = {
+    WARRIOR = true,
+    PALADIN = true,
+    HUNTER = true,
+    ROGUE = true,
+    PRIEST = true,
+    DEATHKNIGHT = true,
+    SHAMAN = true,
+    MAGE = true,
+    WARLOCK = true,
+    DRUID = true,
+}
+
+function SimpleEPGP:CmdExternal(args)
+    local sub = args[2] and args[2]:lower() or ""
+
+    if sub == "add" then
+        local name = args[3]
+        local class = args[4] and args[4]:upper() or nil
+
+        if not name then
+            self:Print("Usage: /sepgp external add <name> [class]")
+            return
+        end
+
+        -- Default class to UNKNOWN if not provided
+        if not class or class == "" then
+            class = "UNKNOWN"
+        end
+
+        -- Validate class token
+        if class ~= "UNKNOWN" and not VALID_CLASSES[class] then
+            self:Print("Invalid class: " .. class)
+            self:Print("Valid classes: WARRIOR, PALADIN, HUNTER, ROGUE, PRIEST, DEATHKNIGHT, SHAMAN, MAGE, WARLOCK, DRUID")
+            return
+        end
+
+        local EPGP = self:GetModule("EPGP")
+        local ok = EPGP:AddExternalPlayer(name, class)
+        if ok then
+            self:Print("Added external player: " .. name .. " (" .. class .. ")")
+        end
+
+    elseif sub == "remove" then
+        local name = args[3]
+        if not name then
+            self:Print("Usage: /sepgp external remove <name>")
+            return
+        end
+
+        local EPGP = self:GetModule("EPGP")
+        local ok = EPGP:RemoveExternalPlayer(name)
+        if ok then
+            self:Print("Removed external player: " .. name)
+        end
+
+    elseif sub == "list" then
+        local EPGP = self:GetModule("EPGP")
+        local extPlayers = EPGP:GetExternalPlayers()
+
+        -- Collect and sort names for consistent output
+        local names = {}
+        for extName in pairs(extPlayers) do
+            names[#names + 1] = extName
+        end
+        table.sort(names)
+
+        if #names == 0 then
+            self:Print("No external players.")
+            return
+        end
+
+        local baseGP = self.db.profile.base_gp or 100
+        local minEP = self.db.profile.min_ep or 0
+
+        self:Print("External players (" .. #names .. "):")
+        for _, extName in ipairs(names) do
+            local data = extPlayers[extName]
+            local ep = data.ep or 0
+            local gp = data.gp or 0
+            local effectiveGP = math.max(gp, 0) + baseGP
+            local pr = 0
+            if ep >= minEP and effectiveGP > 0 then
+                pr = ep / effectiveGP
+            end
+            self:Print(string.format("  %s (%s) — EP: %d  GP: %d  PR: %.2f",
+                extName, data.class or "?", ep, gp, pr))
+        end
+
+    elseif sub == "set" then
+        local name = args[3]
+        local ep = tonumber(args[4])
+        local gp = tonumber(args[5])
+
+        if not name or not ep or not gp then
+            self:Print("Usage: /sepgp external set <name> <ep> <gp>")
+            return
+        end
+
+        if ep < 0 or gp < 0 then
+            self:Print("EP and GP values must be non-negative.")
+            return
+        end
+
+        local EPGP = self:GetModule("EPGP")
+        local ok = EPGP:SetExternalPlayerValues(name, ep, gp)
+        if ok then
+            self:Print("Set " .. name .. " to EP: " .. ep .. "  GP: " .. gp)
+        end
+
+    else
+        self:Print("Usage: /sepgp external add|remove|list|set")
+        self:Print("  /sepgp external add <name> [class] — Add external player")
+        self:Print("  /sepgp external remove <name> — Remove external player")
+        self:Print("  /sepgp external list — List all external players")
+        self:Print("  /sepgp external set <name> <ep> <gp> — Set EP/GP values")
     end
 end
 
@@ -669,6 +795,10 @@ function SimpleEPGP:PrintUsage()
     self:Print("  /sepgp gp <name> <amount> [reason] — Adjust GP")
     self:Print("  /sepgp decay — Apply decay (requires /sepgp confirm)")
     self:Print("  /sepgp standby add|remove|clear|list [name]")
+    self:Print("  /sepgp external add <name> [class] — Add external player")
+    self:Print("  /sepgp external remove <name> — Remove external player")
+    self:Print("  /sepgp external list — List all external players with EP/GP/PR")
+    self:Print("  /sepgp external set <name> <ep> <gp> — Set EP/GP for external player")
     self:Print("  /sepgp slot list — Show slot multipliers")
     self:Print("  /sepgp slot <INVTYPE_X> <value|reset> — Override slot multiplier")
     self:Print("  /sepgp gpoverride <itemID|link> <gp|clear> — Item GP override")
