@@ -230,7 +230,7 @@ local function CreateFrame_()
     raidFilter:SetSize(20, 20)
     raidFilter:SetChecked(filterRaidOnly)
     raidFilter:SetScript("OnClick", function(cb)
-        filterRaidOnly = cb:IsChecked() or false
+        filterRaidOnly = cb:GetChecked() or false
         scrollOffset = 0
         RefreshDisplay()
     end)
