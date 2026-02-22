@@ -364,6 +364,19 @@ function EPGP:GetPlayerInfo(name)
     return playerLookup[NormalizeName(name)]
 end
 
+--- Get a player's rank in the standings (1-based, sorted by PR descending).
+-- @param name Player name (without realm).
+-- @return Rank number, or nil if not found.
+function EPGP:GetPlayerRank(name)
+    local normalized = NormalizeName(name)
+    for i, entry in ipairs(standings) do
+        if entry.name == normalized then
+            return i
+        end
+    end
+    return nil
+end
+
 --- Find a player's current roster index by name.
 -- Roster indices shift when members join/leave, so always re-scan.
 -- @param name Player name (without realm).
