@@ -375,4 +375,185 @@ describe("LootMaster", function()
             assert.is_false(LootMaster.sessions[sessionId].awarded)
         end)
     end)
+
+    --------------------------------------------------------------------------
+    -- Raider-side functions
+    --------------------------------------------------------------------------
+
+    describe("OnOfferReceived", function()
+        it("fires OFFER_RECEIVED callback for non-ML players", function()
+            -- Make this player NOT the master looter (partyId ~= 0)
+            _G._testLootMethod("master", 1, 1)
+
+            local received = nil
+            LootMaster:RegisterUICallback("OFFER_RECEIVED", function(data)
+                received = data
+            end)
+
+            local link = _G._testItemDB[29759][2]
+            LootMaster:OnOfferReceived("SomeML", link, 1000, 42)
+
+            assert.is_not_nil(received)
+            assert.are.equal("SomeML", received.sender)
+            assert.are.equal(link, received.itemLink)
+            assert.are.equal(1000, received.gpCost)
+            assert.are.equal(42, received.sessionId)
+
+            -- Restore default loot method
+            _G._testLootMethod("master", 0, 1)
+        end)
+
+        it("fires OFFER_RECEIVED when loot method is not master", function()
+            _G._testLootMethod("freeforall", 0, 1)
+
+            local received = nil
+            LootMaster:RegisterUICallback("OFFER_RECEIVED", function(data)
+                received = data
+            end)
+
+            local link = _G._testItemDB[29759][2]
+            LootMaster:OnOfferReceived("SomeML", link, 500, 7)
+
+            assert.is_not_nil(received)
+            assert.are.equal(7, received.sessionId)
+
+            _G._testLootMethod("master", 0, 1)
+        end)
+
+        it("suppresses popup when player is ML (master + partyId=0)", function()
+            -- Default test stubs: method=master, partyId=0 -> we ARE the ML
+            _G._testLootMethod("master", 0, 1)
+
+            local received = nil
+            LootMaster:RegisterUICallback("OFFER_RECEIVED", function(data)
+                received = data
+            end)
+
+            local link = _G._testItemDB[29759][2]
+            LootMaster:OnOfferReceived("Player1", link, 1000, 1)
+
+            -- Callback should NOT have fired
+            assert.is_nil(received)
+        end)
+    end)
+
+    describe("SubmitBid", function()
+        it("sends BID via Comms", function()
+            -- Clear sent messages
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+
+            LootMaster:SubmitBid(5, "MS")
+
+            -- Should have sent exactly one comm message
+            assert.are.equal(1, #_G._testSentMessages)
+            assert.are.equal("SimpleEPGP", _G._testSentMessages[1].prefix)
+            assert.are.equal("RAID", _G._testSentMessages[1].distribution)
+
+            -- Deserialize and verify payload
+            local Comms = SimpleEPGP:GetModule("Comms")
+            local ok, data = Comms:Deserialize(_G._testSentMessages[1].message)
+            assert.is_true(ok)
+            assert.are.equal("BID", data.type)
+            assert.are.equal(5, data.sessionId)
+            assert.are.equal("MS", data.bidType)
+        end)
+
+        it("sends correct bid type for OS", function()
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+
+            LootMaster:SubmitBid(3, "OS")
+
+            local Comms = SimpleEPGP:GetModule("Comms")
+            local ok, data = Comms:Deserialize(_G._testSentMessages[1].message)
+            assert.is_true(ok)
+            assert.are.equal("OS", data.bidType)
+            assert.are.equal(3, data.sessionId)
+        end)
+
+        it("sends correct bid type for DE", function()
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+
+            LootMaster:SubmitBid(1, "DE")
+
+            local Comms = SimpleEPGP:GetModule("Comms")
+            local ok, data = Comms:Deserialize(_G._testSentMessages[1].message)
+            assert.is_true(ok)
+            assert.are.equal("DE", data.bidType)
+        end)
+    end)
+
+    describe("RetractBid", function()
+        it("sends RETRACT via Comms", function()
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+
+            LootMaster:RetractBid(9)
+
+            assert.are.equal(1, #_G._testSentMessages)
+            assert.are.equal("SimpleEPGP", _G._testSentMessages[1].prefix)
+            assert.are.equal("RAID", _G._testSentMessages[1].distribution)
+
+            local Comms = SimpleEPGP:GetModule("Comms")
+            local ok, data = Comms:Deserialize(_G._testSentMessages[1].message)
+            assert.is_true(ok)
+            assert.are.equal("RETRACT", data.type)
+            assert.are.equal(9, data.sessionId)
+        end)
+    end)
+
+    describe("OnAwardReceived", function()
+        it("fires AWARD_RECEIVED callback with correct data", function()
+            local received = nil
+            LootMaster:RegisterUICallback("AWARD_RECEIVED", function(data)
+                received = data
+            end)
+
+            local link = _G._testItemDB[29759][2]
+            LootMaster:OnAwardReceived("TheML", link, "Player2", "MS", 1000)
+
+            assert.is_not_nil(received)
+            assert.are.equal("TheML", received.sender)
+            assert.are.equal(link, received.itemLink)
+            assert.are.equal("Player2", received.winner)
+            assert.are.equal("MS", received.bidType)
+            assert.are.equal(1000, received.gpCharged)
+        end)
+
+        it("fires AWARD_RECEIVED with OS bid data", function()
+            local received = nil
+            LootMaster:RegisterUICallback("AWARD_RECEIVED", function(data)
+                received = data
+            end)
+
+            local link = _G._testItemDB[28789][2]
+            LootMaster:OnAwardReceived("TheML", link, "Player3", "OS", 250)
+
+            assert.is_not_nil(received)
+            assert.are.equal("Player3", received.winner)
+            assert.are.equal("OS", received.bidType)
+            assert.are.equal(250, received.gpCharged)
+        end)
+    end)
+
+    describe("OnCancelReceived", function()
+        it("fires CANCEL_RECEIVED callback with correct data", function()
+            local received = nil
+            LootMaster:RegisterUICallback("CANCEL_RECEIVED", function(data)
+                received = data
+            end)
+
+            LootMaster:OnCancelReceived("TheML", 42)
+
+            assert.is_not_nil(received)
+            assert.are.equal("TheML", received.sender)
+            assert.are.equal(42, received.sessionId)
+        end)
+    end)
 end)
