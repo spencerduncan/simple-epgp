@@ -45,35 +45,16 @@ local function RefreshContent()
     editBox:SetCursorPosition(0)
 end
 
+local Utils = SimpleEPGP.UI.Utils
+
 local function CreateFrame_()
-    frame = CreateFrame("Frame", "SimpleEPGPExportFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("DIALOG")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetClampedToScreen(true)
-
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    frame = Utils.CreateStandardFrame({
+        name = "SimpleEPGPExportFrame",
+        width = FRAME_WIDTH,
+        height = FRAME_HEIGHT,
+        title = "Export Standings",
+        onClose = function() ExportFrame:Hide() end,
     })
-
-    -- Title
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", 0, -12)
-    title:SetText("Export Standings")
-    frame.title = title
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -2, -2)
-    closeBtn:SetScript("OnClick", function() ExportFrame:Hide() end)
 
     -- Tab buttons
     local standingsTab = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -110,28 +91,18 @@ local function CreateFrame_()
     scrollFrame:SetScrollChild(editBox)
 
     -- Scroll bar
-    local scrollBar = CreateFrame("Slider", nil, frame)
+    local scrollBar = Utils.CreateScrollbar({
+        parent = frame,
+        topOffset = -56,
+        bottomOffset = 44,
+        onChange = function(_, value)
+            scrollFrame:SetVerticalScroll(value)
+        end,
+    })
+    -- Override default anchor to use -12 instead of -10
+    scrollBar:ClearAllPoints()
     scrollBar:SetPoint("TOPRIGHT", -12, -56)
     scrollBar:SetPoint("BOTTOMRIGHT", -12, 44)
-    scrollBar:SetWidth(12)
-    scrollBar:SetOrientation("VERTICAL")
-    scrollBar:SetMinMaxValues(0, 1)
-    scrollBar:SetValueStep(1)
-    scrollBar:SetObeyStepOnDrag(true)
-    scrollBar:SetValue(0)
-
-    local eTrack = scrollBar:CreateTexture(nil, "BACKGROUND")
-    eTrack:SetAllPoints()
-    eTrack:SetColorTexture(0.1, 0.1, 0.1, 0.3)
-
-    local eThumb = scrollBar:CreateTexture(nil, "OVERLAY")
-    eThumb:SetSize(12, 40)
-    eThumb:SetColorTexture(0.5, 0.5, 0.5, 0.6)
-    scrollBar:SetThumbTexture(eThumb)
-
-    scrollBar:SetScript("OnValueChanged", function(_, value)
-        scrollFrame:SetVerticalScroll(value)
-    end)
 
     -- Update scroll range when editbox content changes
     editBox:SetScript("OnTextChanged", function(self)
@@ -145,11 +116,7 @@ local function CreateFrame_()
     end)
 
     -- Mouse wheel scrolling
-    scrollFrame:EnableMouseWheel(true)
-    scrollFrame:SetScript("OnMouseWheel", function(_, delta)
-        local current = scrollBar:GetValue()
-        scrollBar:SetValue(current - delta * 20)
-    end)
+    Utils.EnableMouseWheelScroll(scrollFrame, scrollBar, 20)
 
     -- Select All button
     local selectBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -161,10 +128,6 @@ local function CreateFrame_()
         editBox:HighlightText()
     end)
 
-    -- Escape to close
-    table.insert(UISpecialFrames, "SimpleEPGPExportFrame")
-
-    frame:Hide()
 end
 
 function ExportFrame:Show()

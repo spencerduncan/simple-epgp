@@ -300,33 +300,18 @@ end
 -- Frame Creation (lazy)
 --------------------------------------------------------------------------------
 
+local Utils = SimpleEPGP.UI.Utils
+
 local function CreateAwardFrame()
-    local f = CreateFrame("Frame", "SimpleEPGPAwardFrame", UIParent, "BackdropTemplate")
-    f:SetSize(500, 490)
-    f:SetPoint("CENTER", UIParent, "CENTER")
-    f:SetFrameStrata("DIALOG")
-    f:SetBackdrop(BACKDROP_INFO)
-    f:SetBackdropColor(0, 0, 0, 0.9)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetClampedToScreen(true)
-    f:Hide()
-
-    -- Add to UISpecialFrames so Escape closes it
-    tinsert(UISpecialFrames, "SimpleEPGPAwardFrame")
-
-    -- Title
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", f, "TOP", 0, -12)
-    title:SetText("SimpleEPGP - Loot Distribution")
-    f.title = title
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
+    local f = Utils.CreateStandardFrame({
+        name = "SimpleEPGPAwardFrame",
+        width = 500,
+        height = 490,
+        title = "SimpleEPGP - Loot Distribution",
+        titleFont = "GameFontNormalLarge",
+        backdrop = BACKDROP_INFO,
+        backdropColor = { 0, 0, 0, 0.9 },
+    })
 
     -- Item list area (top section)
     local itemArea = CreateFrame("Frame", nil, f, "BackdropTemplate")

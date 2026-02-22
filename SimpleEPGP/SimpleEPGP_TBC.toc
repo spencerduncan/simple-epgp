@@ -24,6 +24,7 @@ GPCalc.lua
 Log.lua
 Comms.lua
 LootMaster.lua
+UI\Utils.lua
 UI\Standings.lua
 UI\LootPopup.lua
 UI\AwardFrame.lua

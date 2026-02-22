@@ -43,6 +43,7 @@ dofile("SimpleEPGP/GPCalc.lua")
 dofile("SimpleEPGP/Log.lua")
 dofile("SimpleEPGP/Comms.lua")
 dofile("SimpleEPGP/LootMaster.lua")
+dofile("SimpleEPGP/UI/Utils.lua")
 dofile("SimpleEPGP/UI/GPConfig.lua")
 
 -- Initialize addon (triggers OnInitialize + OnEnable for addon and all modules)

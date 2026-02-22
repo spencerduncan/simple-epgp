@@ -38,33 +38,22 @@ local DEFAULTS = {
     show_gp_tooltip    = true,
 }
 
---- Create a section header label.
+local Utils = SimpleEPGP.UI.Utils
+
+--- Create a section header label (delegates to Utils).
 local function CreateSectionHeader(parent, text, y)
-    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    fs:SetPoint("TOPLEFT", LABEL_X, y)
-    fs:SetText(text)
-    fs:SetTextColor(1.0, 0.82, 0)
-    return fs
+    return Utils.CreateSectionHeader(parent, text, LABEL_X, y)
 end
 
---- Create a setting label.
+--- Create a setting label (delegates to Utils).
 local function CreateLabel(parent, text, y)
-    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    fs:SetPoint("TOPLEFT", LABEL_X + 10, y)
-    fs:SetText(text)
-    return fs
+    return Utils.CreateLabel(parent, text, LABEL_X + 10, y)
 end
 
 --- Create a number/text EditBox.
 local function CreateEditBox(parent, dbKey, y, width)
     width = width or INPUT_WIDTH
-    local box = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    box:SetSize(width, 20)
-    box:SetPoint("TOPLEFT", INPUT_X, y)
-    box:SetAutoFocus(false)
-    box:SetMaxLetters(20)
-    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    local box = Utils.CreateEditBox(parent, INPUT_X, y, width, 20)
     box.dbKey = dbKey
     widgets[dbKey] = box
     return box
@@ -178,33 +167,13 @@ local function ResetToDefaults()
 end
 
 local function CreateFrame_()
-    frame = CreateFrame("Frame", "SimpleEPGPConfigFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("DIALOG")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetClampedToScreen(true)
-
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    frame = Utils.CreateStandardFrame({
+        name = "SimpleEPGPConfigFrame",
+        width = FRAME_WIDTH,
+        height = FRAME_HEIGHT,
+        title = "SimpleEPGP Settings",
+        onClose = function() Config:Hide() end,
     })
-
-    -- Title
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    title:SetPoint("TOP", 0, -12)
-    title:SetText("SimpleEPGP Settings")
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -2, -2)
-    closeBtn:SetScript("OnClick", function() Config:Hide() end)
 
     -- ScrollFrame for the settings content (plain — avoids deprecated UIPanelScrollFrameTemplate)
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame)
@@ -216,36 +185,19 @@ local function CreateFrame_()
     scrollFrame:SetScrollChild(content)
 
     -- Scroll bar
-    local scrollBar = CreateFrame("Slider", nil, frame)
-    scrollBar:SetPoint("TOPRIGHT", -10, -32)
-    scrollBar:SetPoint("BOTTOMRIGHT", -10, 44)
-    scrollBar:SetWidth(12)
-    scrollBar:SetOrientation("VERTICAL")
+    local scrollBar = Utils.CreateScrollbar({
+        parent = frame,
+        topOffset = -32,
+        bottomOffset = 44,
+        onChange = function(_, value)
+            scrollFrame:SetVerticalScroll(value)
+        end,
+    })
     local maxScroll = math.max(0, CONTENT_HEIGHT - (FRAME_HEIGHT - 76))
     scrollBar:SetMinMaxValues(0, maxScroll)
-    scrollBar:SetValueStep(1)
-    scrollBar:SetObeyStepOnDrag(true)
-    scrollBar:SetValue(0)
-
-    local sTrack = scrollBar:CreateTexture(nil, "BACKGROUND")
-    sTrack:SetAllPoints()
-    sTrack:SetColorTexture(0.1, 0.1, 0.1, 0.3)
-
-    local sThumb = scrollBar:CreateTexture(nil, "OVERLAY")
-    sThumb:SetSize(12, 40)
-    sThumb:SetColorTexture(0.5, 0.5, 0.5, 0.6)
-    scrollBar:SetThumbTexture(sThumb)
-
-    scrollBar:SetScript("OnValueChanged", function(_, value)
-        scrollFrame:SetVerticalScroll(value)
-    end)
 
     -- Mouse wheel scrolling on the config frame
-    frame:EnableMouseWheel(true)
-    frame:SetScript("OnMouseWheel", function(_, delta)
-        local current = scrollBar:GetValue()
-        scrollBar:SetValue(current - delta * 20)
-    end)
+    Utils.EnableMouseWheelScroll(frame, scrollBar, 20)
 
     -- Build all settings sections
     local y = -10
@@ -341,10 +293,6 @@ local function CreateFrame_()
     resetBtn:SetText("Reset Defaults")
     resetBtn:SetScript("OnClick", ResetToDefaults)
 
-    -- Escape to close
-    table.insert(UISpecialFrames, "SimpleEPGPConfigFrame")
-
-    frame:Hide()
 end
 
 function Config:Show()

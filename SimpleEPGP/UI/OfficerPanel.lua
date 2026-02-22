@@ -4,6 +4,7 @@
 -----------------------------------------------------------------------
 local SimpleEPGP = LibStub("AceAddon-3.0"):GetAddon("SimpleEPGP")
 local OfficerPanel = SimpleEPGP:NewModule("OfficerPanel")
+local Utils = SimpleEPGP.UI.Utils
 
 local tonumber = tonumber
 local ipairs = ipairs
@@ -163,22 +164,12 @@ end
 -----------------------------------------------------------------------
 
 local function CreateConfirmFrame()
-    confirmFrame = CreateFrame("Frame", "SimpleEPGPOfficerConfirmFrame", UIParent, "BackdropTemplate")
-    confirmFrame:SetSize(340, 140)
-    confirmFrame:SetPoint("CENTER", 0, 100)
-    confirmFrame:SetFrameStrata("FULLSCREEN_DIALOG")
-    confirmFrame:SetMovable(true)
-    confirmFrame:EnableMouse(true)
-    confirmFrame:RegisterForDrag("LeftButton")
-    confirmFrame:SetScript("OnDragStart", confirmFrame.StartMoving)
-    confirmFrame:SetScript("OnDragStop", confirmFrame.StopMovingOrSizing)
-    confirmFrame:SetClampedToScreen(true)
-
-    confirmFrame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    confirmFrame = Utils.CreateStandardFrame({
+        name = "SimpleEPGPOfficerConfirmFrame",
+        width = 340,
+        height = 140,
+        strata = "FULLSCREEN_DIALOG",
+        point = { "CENTER", 0, 100 },
     })
 
     confirmFrame._text = confirmFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -207,10 +198,6 @@ local function CreateConfirmFrame()
         confirmFrame:Hide()
     end)
 
-    -- Escape to close
-    table.insert(UISpecialFrames, "SimpleEPGPOfficerConfirmFrame")
-
-    confirmFrame:Hide()
 end
 
 local function ShowConfirmDialog(message, onConfirm)
@@ -223,34 +210,19 @@ local function ShowConfirmDialog(message, onConfirm)
 end
 
 -----------------------------------------------------------------------
--- Section creation helpers
+-- Section creation helpers (delegate to shared Utils)
 -----------------------------------------------------------------------
 
 local function CreateSectionHeader(parent, text, y)
-    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    fs:SetPoint("TOPLEFT", LABEL_X, y)
-    fs:SetText(text)
-    fs:SetTextColor(1.0, 0.82, 0)
-    return fs
+    return Utils.CreateSectionHeader(parent, text, LABEL_X, y)
 end
 
 local function CreateLabel(parent, text, y)
-    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    fs:SetPoint("TOPLEFT", LABEL_X + 10, y)
-    fs:SetText(text)
-    return fs
+    return Utils.CreateLabel(parent, text, LABEL_X + 10, y)
 end
 
 local function CreateEditBox(parent, y, width)
-    width = width or INPUT_WIDTH
-    local box = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    box:SetSize(width, 20)
-    box:SetPoint("TOPLEFT", INPUT_X, y)
-    box:SetAutoFocus(false)
-    box:SetMaxLetters(100)
-    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-    return box
+    return Utils.CreateEditBox(parent, INPUT_X, y, width or INPUT_WIDTH)
 end
 
 local function CreateActionButton(parent, text, y, onClick)
@@ -284,33 +256,14 @@ local gpAmountBox, gpReasonBox
 local massEPAmountBox, massEPReasonBox
 
 local function CreateFrame_()
-    frame = CreateFrame("Frame", "SimpleEPGPOfficerFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    frame:SetPoint("CENTER")
-    frame:SetFrameStrata("DIALOG")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetClampedToScreen(true)
-
-    frame:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-        tile = true, tileSize = 32, edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    frame = Utils.CreateStandardFrame({
+        name = "SimpleEPGPOfficerFrame",
+        width = FRAME_WIDTH,
+        height = FRAME_HEIGHT,
+        title = "Officer EP/GP Panel",
+        titleFont = "GameFontNormalLarge",
+        onClose = function() OfficerPanel:Hide() end,
     })
-
-    -- Title
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOP", 0, -12)
-    title:SetText("Officer EP/GP Panel")
-
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -2, -2)
-    closeBtn:SetScript("OnClick", function() OfficerPanel:Hide() end)
 
     -- Content area
     local content = CreateFrame("Frame", nil, frame)
@@ -530,10 +483,6 @@ local function CreateFrame_()
         )
     end)
 
-    -- Escape to close
-    table.insert(UISpecialFrames, "SimpleEPGPOfficerFrame")
-
-    frame:Hide()
 end
 
 -----------------------------------------------------------------------

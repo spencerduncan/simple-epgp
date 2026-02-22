@@ -43,27 +43,19 @@ local function CreateBidButton(parent, label, r, g, b, xOffset)
     return btn
 end
 
-local function CreatePopupFrame()
-    local f = CreateFrame("Frame", "SimpleEPGPLootPopup", UIParent, "BackdropTemplate")
-    f:SetSize(280, 120)
-    f:SetPoint("TOP", UIParent, "TOP", 0, -120)
-    f:SetFrameStrata("DIALOG")
-    f:SetBackdrop(BACKDROP_INFO)
-    f:SetBackdropColor(0, 0, 0, 0.85)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetClampedToScreen(true)
-    f:Hide()
+local Utils = SimpleEPGP.UI.Utils
 
-    -- Close button (X) in corner for manual dismiss
-    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-    closeBtn:SetSize(20, 20)
-    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
-    closeBtn:SetScript("OnClick", function() DismissPopup() end)
-    f.closeBtn = closeBtn
+local function CreatePopupFrame()
+    local f = Utils.CreateStandardFrame({
+        name = "SimpleEPGPLootPopup",
+        width = 280,
+        height = 120,
+        backdrop = BACKDROP_INFO,
+        backdropColor = { 0, 0, 0, 0.85 },
+        point = { "TOP", UIParent, "TOP", 0, -120 },
+        onClose = function() DismissPopup() end,
+    })
+    f.closeBtn:SetSize(20, 20)
 
     -- Item icon
     local icon = f:CreateTexture(nil, "ARTWORK")
@@ -201,8 +193,6 @@ function LootPopup:ShowOffer(sessionId, itemLink, gpCost)
 
     if not popupFrame then
         popupFrame = CreatePopupFrame()
-        -- Register for Escape-to-close (only once, when frame is first created)
-        tinsert(UISpecialFrames, "SimpleEPGPLootPopup")
     end
 
     ResetPopup()
