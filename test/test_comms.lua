@@ -57,31 +57,103 @@ describe("Comms", function()
     end)
 
     describe("message sending", function()
-        it("sends OFFER messages", function()
+        -- Helper: deserialize the payload from a sent message
+        local function deserializeSent(index)
+            local msg = _G._testSentMessages[index or 1].message
+            local ok, data = Comms:Deserialize(msg)
+            assert.is_true(ok, "Deserialize should succeed")
+            return data
+        end
+
+        it("sends OFFER messages with correct payload", function()
             Comms:SendOffer("itemlink", 1000, 1)
             assert.are.equal(1, #_G._testSentMessages)
             assert.are.equal("SimpleEPGP", _G._testSentMessages[1].prefix)
             assert.are.equal("RAID", _G._testSentMessages[1].distribution)
+
+            local data = deserializeSent(1)
+            assert.are.equal("OFFER", data.type)
+            assert.are.equal("itemlink", data.itemLink)
+            assert.are.equal(1000, data.gpCost)
+            assert.are.equal(1, data.sessionId)
         end)
 
-        it("sends BID messages", function()
+        it("sends BID messages with correct payload", function()
             Comms:SendBid(1, "MS")
             assert.are.equal(1, #_G._testSentMessages)
+            assert.are.equal("SimpleEPGP", _G._testSentMessages[1].prefix)
+            assert.are.equal("RAID", _G._testSentMessages[1].distribution)
+
+            local data = deserializeSent(1)
+            assert.are.equal("BID", data.type)
+            assert.are.equal(1, data.sessionId)
+            assert.are.equal("MS", data.bidType)
         end)
 
-        it("sends AWARD messages", function()
+        it("sends AWARD messages with correct payload", function()
             Comms:SendAward("itemlink", "Player1", "MS", 1000)
             assert.are.equal(1, #_G._testSentMessages)
+            assert.are.equal("SimpleEPGP", _G._testSentMessages[1].prefix)
+            assert.are.equal("RAID", _G._testSentMessages[1].distribution)
+
+            local data = deserializeSent(1)
+            assert.are.equal("AWARD", data.type)
+            assert.are.equal("itemlink", data.itemLink)
+            assert.are.equal("Player1", data.winner)
+            assert.are.equal("MS", data.bidType)
+            assert.are.equal(1000, data.gpCharged)
         end)
 
-        it("sends RETRACT messages", function()
+        it("sends RETRACT messages with correct payload", function()
             Comms:SendRetract(1)
             assert.are.equal(1, #_G._testSentMessages)
+            assert.are.equal("SimpleEPGP", _G._testSentMessages[1].prefix)
+            assert.are.equal("RAID", _G._testSentMessages[1].distribution)
+
+            local data = deserializeSent(1)
+            assert.are.equal("RETRACT", data.type)
+            assert.are.equal(1, data.sessionId)
         end)
 
-        it("sends CANCEL messages", function()
+        it("sends CANCEL messages with correct payload", function()
             Comms:SendCancel(1)
             assert.are.equal(1, #_G._testSentMessages)
+            assert.are.equal("SimpleEPGP", _G._testSentMessages[1].prefix)
+            assert.are.equal("RAID", _G._testSentMessages[1].distribution)
+
+            local data = deserializeSent(1)
+            assert.are.equal("CANCEL", data.type)
+            assert.are.equal(1, data.sessionId)
+        end)
+
+        it("sends STANDINGS_REQUEST with correct payload", function()
+            Comms:SendStandingsRequest()
+            assert.are.equal(1, #_G._testSentMessages)
+            assert.are.equal("SimpleEPGP", _G._testSentMessages[1].prefix)
+            assert.are.equal("GUILD", _G._testSentMessages[1].distribution)
+
+            local data = deserializeSent(1)
+            assert.are.equal("STANDINGS_REQUEST", data.type)
+        end)
+
+        it("sends STANDINGS_SYNC with correct payload", function()
+            local standingsData = {
+                { n = "Alice", c = "PALADIN", e = 5000, g = 1000 },
+                { n = "Bob", c = "ROGUE", e = 3000, g = 500 },
+            }
+            Comms:SendStandingsSync("TargetPlayer", standingsData)
+            assert.are.equal(1, #_G._testSentMessages)
+            assert.are.equal("SimpleEPGP", _G._testSentMessages[1].prefix)
+            assert.are.equal("WHISPER", _G._testSentMessages[1].distribution)
+            assert.are.equal("TargetPlayer", _G._testSentMessages[1].target)
+            assert.are.equal("BULK", _G._testSentMessages[1].priority)
+
+            local data = deserializeSent(1)
+            assert.are.equal("STANDINGS_SYNC", data.type)
+            assert.are.equal(2, #data.standings)
+            assert.are.equal("Alice", data.standings[1].n)
+            assert.are.equal(5000, data.standings[1].e)
+            assert.are.equal("Bob", data.standings[2].n)
         end)
     end)
 
@@ -184,6 +256,246 @@ describe("Comms", function()
             -- Sender without realm suffix (same realm)
             _G._testReceiveComm(Comms, "SimpleEPGP", msg, "RAID", "JustAName")
             assert.are.equal("JustAName", receivedSender)
+        end)
+    end)
+
+    describe("OnCommReceived error handling", function()
+        it("ignores messages with wrong prefix", function()
+            local received = nil
+            Comms:RegisterCallback("BID", function(sender, data)
+                received = data
+            end)
+            -- Send a valid BID message
+            Comms:SendBid(1, "MS")
+            local msg = _G._testSentMessages[1].message
+            -- Deliver it with a wrong prefix
+            _G._testReceiveComm(Comms, "WrongAddon", msg, "RAID", "Sender-Realm")
+            assert.is_nil(received)
+        end)
+
+        it("ignores malformed serialized data", function()
+            local received = nil
+            Comms:RegisterCallback("BID", function(sender, data)
+                received = data
+            end)
+            -- Send garbage that won't deserialize to a valid table
+            _G._testReceiveComm(Comms, "SimpleEPGP", "this is not valid serialized data!!!", "RAID", "Sender-Realm")
+            assert.is_nil(received)
+        end)
+
+        it("ignores data with missing type field", function()
+            local callbackFired = false
+            -- Register callbacks for several types to catch any accidental dispatch
+            for _, msgType in ipairs({"OFFER", "BID", "AWARD", "RETRACT", "CANCEL"}) do
+                Comms:RegisterCallback(msgType, function()
+                    callbackFired = true
+                end)
+            end
+            -- Serialize a table with no "type" field
+            local payload = Comms:Serialize({ sessionId = 1, bidType = "MS" })
+            _G._testReceiveComm(Comms, "SimpleEPGP", payload, "RAID", "Sender-Realm")
+            assert.is_false(callbackFired)
+        end)
+
+        it("ignores non-table deserialized data", function()
+            local callbackFired = false
+            Comms:RegisterCallback("BID", function()
+                callbackFired = true
+            end)
+            -- Serialize a plain string instead of a table
+            local payload = Comms:Serialize("just a string")
+            _G._testReceiveComm(Comms, "SimpleEPGP", payload, "RAID", "Sender-Realm")
+            assert.is_false(callbackFired)
+        end)
+
+        it("ignores non-table deserialized data (number)", function()
+            local callbackFired = false
+            Comms:RegisterCallback("BID", function()
+                callbackFired = true
+            end)
+            -- Serialize a plain number
+            local payload = Comms:Serialize(42)
+            _G._testReceiveComm(Comms, "SimpleEPGP", payload, "RAID", "Sender-Realm")
+            assert.is_false(callbackFired)
+        end)
+
+        it("ignores non-table deserialized data (boolean)", function()
+            local callbackFired = false
+            Comms:RegisterCallback("BID", function()
+                callbackFired = true
+            end)
+            local payload = Comms:Serialize(true)
+            _G._testReceiveComm(Comms, "SimpleEPGP", payload, "RAID", "Sender-Realm")
+            assert.is_false(callbackFired)
+        end)
+    end)
+
+    describe("OnStandingsRequest self-filtering", function()
+        local EPGP
+
+        before_each(function()
+            EPGP = SimpleEPGP:GetModule("EPGP")
+            -- Build standings so officer has data to send
+            _G._testGuildRoster[1].officerNote = "5000,1000"
+            _G._testGuildRoster[2].officerNote = "3000,500"
+            EPGP:GUILD_ROSTER_UPDATE()
+            -- Clear messages
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+        end)
+
+        it("does not respond to own standings request", function()
+            -- UnitName("player") returns "Player1" in wow_stubs
+            -- Simulate receiving a STANDINGS_REQUEST from ourselves
+            local payload = Comms:Serialize({ type = "STANDINGS_REQUEST" })
+            _G._testReceiveComm(Comms, "SimpleEPGP", payload, "GUILD", "Player1")
+
+            -- Officer should NOT have sent a response (self-request filter)
+            assert.are.equal(0, #_G._testSentMessages)
+        end)
+
+        it("responds to standings request from another player", function()
+            -- Simulate receiving a STANDINGS_REQUEST from someone else
+            local payload = Comms:Serialize({ type = "STANDINGS_REQUEST" })
+            _G._testReceiveComm(Comms, "SimpleEPGP", payload, "GUILD", "OtherPlayer-Realm")
+
+            -- Officer should respond with STANDINGS_SYNC via whisper
+            assert.are.equal(1, #_G._testSentMessages)
+            assert.are.equal("WHISPER", _G._testSentMessages[1].distribution)
+            assert.are.equal("OtherPlayer", _G._testSentMessages[1].target)
+        end)
+
+        it("does not respond to request if not an officer", function()
+            -- Temporarily stub CanViewOfficerNote to return false
+            local origCanView = C_GuildInfo.CanViewOfficerNote
+            C_GuildInfo.CanViewOfficerNote = function() return false end
+
+            local payload = Comms:Serialize({ type = "STANDINGS_REQUEST" })
+            _G._testReceiveComm(Comms, "SimpleEPGP", payload, "GUILD", "SomePlayer-Realm")
+
+            -- Non-officer should NOT respond
+            assert.are.equal(0, #_G._testSentMessages)
+
+            C_GuildInfo.CanViewOfficerNote = origCanView
+        end)
+    end)
+
+    describe("CheckNeedSync", function()
+        local EPGP
+
+        before_each(function()
+            EPGP = SimpleEPGP:GetModule("EPGP")
+            -- Clear messages
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+        end)
+
+        it("does not request sync when officer can view notes", function()
+            -- Default stubs: CanViewOfficerNote returns true
+            -- Set up standings with nonzero EP/GP
+            _G._testGuildRoster[1].officerNote = "5000,1000"
+            EPGP:GUILD_ROSTER_UPDATE()
+
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+
+            EPGP:CheckNeedSync()
+
+            -- Should not have sent a STANDINGS_REQUEST
+            assert.are.equal(0, #_G._testSentMessages)
+        end)
+
+        it("requests sync when non-officer sees all-zero standings", function()
+            -- Stub: cannot view officer notes
+            local origCanView = C_GuildInfo.CanViewOfficerNote
+            C_GuildInfo.CanViewOfficerNote = function() return false end
+
+            -- Set up roster with zero EP/GP (non-officer can't read notes)
+            _G._testGuildRoster[1].officerNote = ""
+            _G._testGuildRoster[2].officerNote = ""
+            _G._testGuildRoster[3].officerNote = ""
+            _G._testGuildRoster[4].officerNote = ""
+            _G._testGuildRoster[5].officerNote = ""
+            EPGP:GUILD_ROSTER_UPDATE()
+
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+
+            EPGP:CheckNeedSync()
+
+            -- Should have sent a STANDINGS_REQUEST (C_Timer.After fires immediately in tests)
+            assert.is_true(#_G._testSentMessages > 0)
+            local data = Comms:Deserialize(_G._testSentMessages[1].message)
+            -- Deserialize returns (true, data) — need second return value
+            local ok, payload = Comms:Deserialize(_G._testSentMessages[1].message)
+            assert.is_true(ok)
+            assert.are.equal("STANDINGS_REQUEST", payload.type)
+            assert.are.equal("GUILD", _G._testSentMessages[1].distribution)
+
+            C_GuildInfo.CanViewOfficerNote = origCanView
+        end)
+
+        it("does not request sync if already synced from officer", function()
+            -- Stub: cannot view officer notes
+            local origCanView = C_GuildInfo.CanViewOfficerNote
+            C_GuildInfo.CanViewOfficerNote = function() return false end
+
+            -- Set up all-zero standings
+            _G._testGuildRoster[1].officerNote = ""
+            _G._testGuildRoster[2].officerNote = ""
+            _G._testGuildRoster[3].officerNote = ""
+            _G._testGuildRoster[4].officerNote = ""
+            _G._testGuildRoster[5].officerNote = ""
+            EPGP:GUILD_ROSTER_UPDATE()
+
+            -- Simulate having already received a sync
+            -- Use OnStandingsSync to set the synced flag properly
+            EPGP:OnStandingsSync("Officer", {
+                standings = {
+                    { n = "Player1", c = "WARRIOR", e = 100, g = 50 },
+                },
+            })
+
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+
+            EPGP:CheckNeedSync()
+
+            -- Should NOT request sync — already synced
+            assert.are.equal(0, #_G._testSentMessages)
+
+            C_GuildInfo.CanViewOfficerNote = origCanView
+        end)
+
+        it("does not request sync if standings have nonzero values", function()
+            -- Stub: cannot view officer notes
+            local origCanView = C_GuildInfo.CanViewOfficerNote
+            C_GuildInfo.CanViewOfficerNote = function() return false end
+
+            -- Simulate a non-officer that somehow has nonzero standings
+            -- (e.g., received a broadcast earlier)
+            -- First, receive a sync with real data
+            EPGP:OnStandingsSync("Officer", {
+                standings = {
+                    { n = "Player1", c = "WARRIOR", e = 5000, g = 1000 },
+                },
+            })
+
+            for i = #_G._testSentMessages, 1, -1 do
+                _G._testSentMessages[i] = nil
+            end
+
+            -- Now CheckNeedSync: already synced, should skip
+            EPGP:CheckNeedSync()
+
+            assert.are.equal(0, #_G._testSentMessages)
+
+            C_GuildInfo.CanViewOfficerNote = origCanView
         end)
     end)
 
