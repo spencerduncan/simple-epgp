@@ -64,6 +64,9 @@ local defaults = {
         -- Tooltip
         show_gp_tooltip = true,
 
+        -- Chat-based bidding (non-addon users)
+        enable_chat_bids = true,
+
         -- Announcements
         announce_channel = "GUILD",
         announce_awards = true,

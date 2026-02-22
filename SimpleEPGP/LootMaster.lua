@@ -26,6 +26,19 @@ assert(GetLootMethod, "SimpleEPGP: Neither GetLootMethod nor C_PartyInfo.GetLoot
 local GetMasterLootCandidate = GetMasterLootCandidate
 local GiveMasterLoot = GiveMasterLoot
 
+-- Chat bid keyword -> internal bid type mapping (case-insensitive lookup)
+local BID_KEYWORDS = {
+    ms = "MS", mainspec = "MS",
+    os = "OS", offspec = "OS",
+    de = "DE", disenchant = "DE",
+    pass = "PASS",
+}
+
+-- Friendly display names for bid types in whisper confirmations
+local BID_DISPLAY = {
+    MS = "MS", OS = "OS", DE = "DE", PASS = "Pass",
+}
+
 -- Callback registry for UI notifications
 local uiCallbacks = {}
 
@@ -73,10 +86,117 @@ function LootMaster:OnEnable()
     Comms:RegisterCallback("CANCEL", function(sender, data)
         self:OnCancelReceived(sender, data.sessionId)
     end)
+
+    -- Register chat events for non-addon bidding
+    self:RegisterEvent("CHAT_MSG_WHISPER")
+    self:RegisterEvent("CHAT_MSG_RAID")
 end
 
 function LootMaster:OnDisable()
     self:UnregisterAllEvents()
+end
+
+--------------------------------------------------------------------------------
+-- Chat-Based Bidding (non-addon users)
+--------------------------------------------------------------------------------
+
+--- Parse a chat message for a bid keyword.
+-- @param message string The chat message text
+-- @return string|nil The internal bid type ("MS", "OS", "DE", "PASS") or nil
+function LootMaster:ParseChatBid(message)
+    if not message then return nil end
+    local trimmed = message:match("^%s*(.-)%s*$")
+    if not trimmed or trimmed == "" then return nil end
+    return BID_KEYWORDS[trimmed:lower()]
+end
+
+--- Check whether a player name is in the current raid roster.
+-- @param name string Character name (without realm)
+-- @return boolean
+function LootMaster:IsRaidMember(name)
+    if not name then return false end
+    local numMembers = GetNumGroupMembers()
+    for i = 1, numMembers do
+        local raidName = GetRaidRosterInfo(i)
+        if raidName then
+            local cleanName = StripRealm(raidName)
+            if cleanName == name then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+--- Find the most recent active (non-awarded) session.
+-- When multiple sessions exist, non-addon users have no way to specify
+-- which session they're bidding on, so we match to the highest session ID.
+-- @return number|nil sessionId, or nil if no active sessions
+function LootMaster:GetMostRecentSession()
+    local bestId = nil
+    for sessionId, session in pairs(self.sessions) do
+        if not session.awarded then
+            if not bestId or sessionId > bestId then
+                bestId = sessionId
+            end
+        end
+    end
+    return bestId
+end
+
+--- Process an incoming chat bid from a whisper or raid message.
+-- Shared handler for CHAT_MSG_WHISPER and CHAT_MSG_RAID.
+-- @param sender string Sender name (may include realm)
+-- @param message string The chat message text
+function LootMaster:HandleChatBid(sender, message)
+    local db = SimpleEPGP.db
+    if not db.profile.enable_chat_bids then return end
+
+    local bidType = self:ParseChatBid(message)
+    if not bidType then return end
+
+    local cleanSender = StripRealm(sender)
+    if not cleanSender then return end
+
+    -- Only process bids from current raid members
+    if not self:IsRaidMember(cleanSender) then return end
+
+    -- Find the most recent active session
+    local sessionId = self:GetMostRecentSession()
+    if not sessionId then return end
+
+    local Debug = SimpleEPGP:GetModule("Debug", true)
+    if Debug then Debug:Log("LOOT", "ChatBid", { sender = cleanSender, bidType = bidType, sessionId = sessionId }) end
+
+    -- Inject the bid into the session
+    self:OnBidReceived(cleanSender, sessionId, bidType)
+
+    -- Whisper confirmation back to the bidder
+    local session = self.sessions[sessionId]
+    if session then
+        local displayType = BID_DISPLAY[bidType] or bidType
+        local confirmMsg = string.format("Bid received: %s for %s",
+            displayType, session.itemLink)
+        SendChatMessage(confirmMsg, "WHISPER", nil, sender)
+    end
+end
+
+--- CHAT_MSG_WHISPER event handler.
+-- Fired when the player receives a whisper.
+-- @param _ string Event name (unused)
+-- @param message string The whisper text
+-- @param sender string Sender name (may include realm)
+function LootMaster:CHAT_MSG_WHISPER(_, message, sender)
+    self:HandleChatBid(sender, message)
+end
+
+--- CHAT_MSG_RAID event handler.
+-- Fired when a message is sent in raid chat.
+-- @param _ string Event name (unused)
+-- @param message string The raid chat text
+-- @param sender string Sender name (may include realm)
+function LootMaster:CHAT_MSG_RAID(_, message, sender)
+    self:HandleChatBid(sender, message)
 end
 
 --------------------------------------------------------------------------------
