@@ -11,6 +11,7 @@ local SimpleEPGP = LibStub("AceAddon-3.0"):NewAddon("SimpleEPGP",
 local ipairs = ipairs
 local tonumber = tonumber
 local table = table
+local time = time
 local SendChatMessage = SendChatMessage
 local IsInRaid = IsInRaid
 local GetItemInfo = GetItemInfo
@@ -26,6 +27,10 @@ end
 
 -- Pending confirmation state for dangerous commands (decay, reset)
 local pendingAction = nil
+
+-- Rate limiting for whisper stats: sender -> last response timestamp
+-- Stored on addon object so tests can inspect/reset it.
+SimpleEPGP._whisperRateLimit = {}
 
 -- AceDB defaults — the single source of truth for all addon settings
 local defaults = {
@@ -66,6 +71,9 @@ local defaults = {
         announce_loot_rw = true,
         announce_awards_raid = true,
 
+        -- Whisper stats
+        enable_whisper_stats = true,
+
         -- External players (pugs, allies, cross-realm)
         -- Format: { ["Pugname"] = { class = "WARRIOR", ep = 0, gp = 0, modified_by = "OfficerName", modified_at = 1234567890 } }
         external_players = {},
@@ -98,6 +106,9 @@ end
 function SimpleEPGP:OnEnable()
     -- Register boss kill event for auto-EP
     self:RegisterEvent("ENCOUNTER_END")
+
+    -- Register whisper event for stats queries
+    self:RegisterEvent("CHAT_MSG_WHISPER")
 
     local Debug = self:GetModule("Debug", true)
     if Debug then Debug:Log("INFO", "OnEnable — addon loaded", { version = ADDON_VERSION }) end
@@ -136,6 +147,53 @@ function SimpleEPGP:ENCOUNTER_END(_, encounterID, encounterName, difficultyID, g
             channel
         )
     end
+end
+
+--------------------------------------------------------------------------------
+-- Whisper Stats — respond to !epgp / !stats / !pr whispers
+--------------------------------------------------------------------------------
+
+-- Whisper stat keywords (case-insensitive match)
+local WHISPER_KEYWORDS = { ["!epgp"] = true, ["!stats"] = true, ["!pr"] = true }
+
+--- CHAT_MSG_WHISPER fires when the player receives a whisper.
+-- @param _ string Event name (unused)
+-- @param msg string The whisper message text
+-- @param sender string The sender's name (may include realm suffix)
+function SimpleEPGP:CHAT_MSG_WHISPER(_, msg, sender)
+    if not self.db.profile.enable_whisper_stats then return end
+
+    -- Check if the message matches a stats keyword
+    local trimmed = (msg or ""):match("^%s*(.-)%s*$"):lower()
+    if not WHISPER_KEYWORDS[trimmed] then return end
+
+    -- Normalize sender name
+    local shortName = SimpleEPGP.StripRealm(sender)
+    if not shortName then return end
+
+    -- Rate limit: max 1 response per player per 30 seconds
+    local now = time()
+    if self._whisperRateLimit[shortName] and (now - self._whisperRateLimit[shortName] < 30) then
+        return
+    end
+    self._whisperRateLimit[shortName] = now
+
+    -- Look up player in standings
+    local EPGP = self:GetModule("EPGP")
+    local info = EPGP:GetPlayerInfo(shortName)
+    if not info then
+        SendChatMessage("SimpleEPGP: You are not in the EPGP standings.", "WHISPER", nil, sender)
+        return
+    end
+
+    -- Get rank by iterating sorted standings
+    local rank = EPGP:GetPlayerRank(shortName)
+
+    local reply = string.format(
+        "Your EPGP: EP=%d, GP=%d, PR=%.2f (Rank #%d)",
+        info.ep, info.gp, info.pr, rank or 0
+    )
+    SendChatMessage(reply, "WHISPER", nil, sender)
 end
 
 --------------------------------------------------------------------------------
