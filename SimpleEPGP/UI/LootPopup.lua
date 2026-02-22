@@ -13,16 +13,22 @@ local popupFrame
 local offerQueue = {}
 -- Currently displayed session
 local currentSessionId
+-- Pending uncached item info for GET_ITEM_INFO_RECEIVED retry
+local pendingItemId
+local pendingItemLink
+
+-- Forward-declare DismissPopup so CreatePopupFrame can reference it
+local DismissPopup
 
 --------------------------------------------------------------------------------
 -- Frame Creation (lazy)
 --------------------------------------------------------------------------------
 
+-- Note: tileEdge omitted — it is a WoW 8.0+ field, not available in TBC
 local BACKDROP_INFO = {
     bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
     edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
     tile = true,
-    tileEdge = true,
     tileSize = 32,
     edgeSize = 16,
     insets = { left = 4, right = 4, top = 4, bottom = 4 },
@@ -51,6 +57,13 @@ local function CreatePopupFrame()
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
     f:SetClampedToScreen(true)
     f:Hide()
+
+    -- Close button (X) in corner for manual dismiss
+    local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    closeBtn:SetSize(20, 20)
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
+    closeBtn:SetScript("OnClick", function() DismissPopup() end)
+    f.closeBtn = closeBtn
 
     -- Item icon
     local icon = f:CreateTexture(nil, "ARTWORK")
@@ -158,6 +171,19 @@ local function ResetPopup()
     popupFrame:SetScript("OnUpdate", nil)
 end
 
+--- Update the popup display with resolved item info.
+-- Called when item data becomes available (either immediately or after cache).
+local function UpdateItemDisplay(itemLink)
+    if not popupFrame then return end
+    local itemName, _, quality, _, _, _, _, _, _, texture = GetItemInfo(itemLink)
+    if itemName then
+        local r, g, b = GetItemQualityColor(quality)
+        popupFrame.icon:SetTexture(texture)
+        popupFrame.nameText:SetText(itemName)
+        popupFrame.nameText:SetTextColor(r, g, b)
+    end
+end
+
 --- Show the popup for an offer.
 -- @param sessionId number
 -- @param itemLink string
@@ -175,6 +201,8 @@ function LootPopup:ShowOffer(sessionId, itemLink, gpCost)
 
     if not popupFrame then
         popupFrame = CreatePopupFrame()
+        -- Register for Escape-to-close (only once, when frame is first created)
+        tinsert(UISpecialFrames, "SimpleEPGPLootPopup")
     end
 
     ResetPopup()
@@ -188,9 +216,31 @@ function LootPopup:ShowOffer(sessionId, itemLink, gpCost)
         popupFrame.nameText:SetText(itemName)
         popupFrame.nameText:SetTextColor(r, g, b)
     else
+        -- Item not cached — show placeholder and request data
         popupFrame.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
         popupFrame.nameText:SetText(itemLink)
         popupFrame.nameText:SetTextColor(1, 1, 1)
+
+        -- Extract item ID and request data from server
+        local itemId = tonumber(itemLink:match("item:(%d+)"))
+        if itemId then
+            pendingItemId = itemId
+            pendingItemLink = itemLink
+            if C_Item and C_Item.RequestLoadItemDataByID then
+                C_Item.RequestLoadItemDataByID(itemId)
+            end
+            self:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+
+            -- Timeout after 5 seconds to clean up if data never arrives
+            local capturedItemId = itemId
+            C_Timer.After(5, function()
+                if pendingItemId == capturedItemId then
+                    pendingItemId = nil
+                    pendingItemLink = nil
+                    self:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+                end
+            end)
+        end
     end
 
     -- Calculate GP costs for each bid type
@@ -233,16 +283,50 @@ function LootPopup:ShowOffer(sessionId, itemLink, gpCost)
         end
     end)
 
+    -- Auto-dismiss after bid_timer + 10s grace period
+    local dismissSessionId = sessionId
+    C_Timer.After(bidTimer + 10, function()
+        if currentSessionId == dismissSessionId then
+            DismissPopup()
+        end
+    end)
+
     popupFrame:Show()
 end
 
+--- Event handler for GET_ITEM_INFO_RECEIVED.
+-- Fires when the client receives item data from the server.
+-- Updates the popup display if the pending item matches.
+function LootPopup:GET_ITEM_INFO_RECEIVED(_, receivedItemID)
+    if not pendingItemId then return end
+    if tonumber(receivedItemID) ~= pendingItemId then return end
+
+    self:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+
+    local itemLink = pendingItemLink
+    pendingItemId = nil
+    pendingItemLink = nil
+
+    -- Update popup display if it is still showing
+    if popupFrame and popupFrame:IsShown() and itemLink then
+        UpdateItemDisplay(itemLink)
+    end
+end
+
 --- Dismiss the popup and show next queued offer if any.
-local function DismissPopup()
+DismissPopup = function()
     if popupFrame then
         popupFrame:Hide()
         popupFrame:SetScript("OnUpdate", nil)
     end
     currentSessionId = nil
+
+    -- Clean up any pending item info request
+    if pendingItemId then
+        pendingItemId = nil
+        pendingItemLink = nil
+        LootPopup:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+    end
 
     -- Show next queued offer
     if #offerQueue > 0 then
@@ -303,4 +387,10 @@ function LootPopup:OnDisable()
     end
     offerQueue = {}
     currentSessionId = nil
+    -- Clean up any pending item info request
+    if pendingItemId then
+        pendingItemId = nil
+        pendingItemLink = nil
+        self:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+    end
 end
