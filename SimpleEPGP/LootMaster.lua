@@ -154,6 +154,14 @@ function LootMaster:StartSession(itemLink, gpCost)
     local Comms = SimpleEPGP:GetModule("Comms")
     Comms:SendOffer(itemLink, gpCost, sessionId)
 
+    -- Announce to /rw (RAID_WARNING) if configured and in a raid
+    if db.profile.announce_loot_rw and IsInRaid() then
+        local rwTimer = db.profile.bid_timer or 30
+        local rwMsg = string.format("SimpleEPGP: Now bidding on %s -- %ds to bid!",
+            itemLink, rwTimer)
+        SendChatMessage(rwMsg, "RAID_WARNING")
+    end
+
     -- Start the bid timer (use NewTicker with 1 iteration for a cancellable one-shot)
     local bidTimer = db.profile.bid_timer or 30
     session.timer = C_Timer.NewTicker(bidTimer, function()
@@ -313,6 +321,13 @@ function LootMaster:AwardItem(sessionId, winnerName, bidType)
         local msg = string.format("%s awarded to %s (%s) for %d GP",
             session.itemLink, winnerName, bidType, gpCharged)
         SendChatMessage(msg, announceChannel)
+    end
+
+    -- Announce award to /ra (RAID) if configured and in a raid
+    if db.profile.announce_awards_raid and IsInRaid() then
+        local raidMsg = string.format("SimpleEPGP: %s awarded to %s (%s) for %d GP",
+            session.itemLink, winnerName, bidType, gpCharged)
+        SendChatMessage(raidMsg, "RAID")
     end
 
     -- Mark session as awarded and clean up timer

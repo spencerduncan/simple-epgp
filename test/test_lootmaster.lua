@@ -1,5 +1,5 @@
 -----------------------------------------------------------------------
--- test_lootmaster.lua — Unit tests for LootMaster module
+-- test_lootmaster.lua -- Unit tests for LootMaster module
 -----------------------------------------------------------------------
 
 -- Load stubs first
@@ -33,6 +33,8 @@ SimpleEPGP.db = LibStub("AceDB-3.0"):New("SimpleEPGPDB", {
         announce_channel = "GUILD",
         announce_awards = true,
         announce_ep = true,
+        announce_loot_rw = true,
+        announce_awards_raid = true,
     },
 }, true)
 
@@ -67,10 +69,22 @@ describe("LootMaster", function()
         LootMaster.sessions = {}
         LootMaster.nextSessionId = 1
 
-        -- Clear sent messages
+        -- Clear sent messages (addon comms)
         for i = #_G._testSentMessages, 1, -1 do
             _G._testSentMessages[i] = nil
         end
+
+        -- Clear chat messages (SendChatMessage captures)
+        for i = #_G._testChatMessages, 1, -1 do
+            _G._testChatMessages[i] = nil
+        end
+
+        -- Reset announcement config defaults
+        SimpleEPGP.db.profile.announce_loot_rw = true
+        SimpleEPGP.db.profile.announce_awards_raid = true
+
+        -- Ensure IsInRaid returns true by default
+        _G.IsInRaid = function() return true end
     end)
 
     describe("StartSession", function()
@@ -554,6 +568,210 @@ describe("LootMaster", function()
             assert.is_not_nil(received)
             assert.are.equal("TheML", received.sender)
             assert.are.equal(42, received.sessionId)
+        end)
+    end)
+
+    --------------------------------------------------------------------------
+    -- Raid channel announcements (#50)
+    --------------------------------------------------------------------------
+
+    describe("Raid announcements", function()
+        describe("StartSession RAID_WARNING", function()
+            it("sends RAID_WARNING announcement when announce_loot_rw is true and in raid", function()
+                SimpleEPGP.db.profile.announce_loot_rw = true
+                _G.IsInRaid = function() return true end
+
+                local link = _G._testItemDB[29759][2]
+                LootMaster:StartSession(link, 1000)
+
+                -- Find a RAID_WARNING message in _testChatMessages
+                local found = false
+                for _, msg in ipairs(_G._testChatMessages) do
+                    if msg.channel == "RAID_WARNING" then
+                        found = true
+                        assert.is_truthy(msg.text:find("Now bidding on"))
+                        assert.is_truthy(msg.text:find("30s to bid"))
+                        break
+                    end
+                end
+                assert.is_true(found, "Expected RAID_WARNING chat message")
+            end)
+
+            it("does NOT send RAID_WARNING when announce_loot_rw is false", function()
+                SimpleEPGP.db.profile.announce_loot_rw = false
+                _G.IsInRaid = function() return true end
+
+                local link = _G._testItemDB[29759][2]
+                LootMaster:StartSession(link, 1000)
+
+                for _, msg in ipairs(_G._testChatMessages) do
+                    assert.are_not.equal("RAID_WARNING", msg.channel,
+                        "Should not send RAID_WARNING when announce_loot_rw is false")
+                end
+            end)
+
+            it("does NOT send RAID_WARNING when not in a raid", function()
+                SimpleEPGP.db.profile.announce_loot_rw = true
+                _G.IsInRaid = function() return false end
+
+                local link = _G._testItemDB[29759][2]
+                LootMaster:StartSession(link, 1000)
+
+                for _, msg in ipairs(_G._testChatMessages) do
+                    assert.are_not.equal("RAID_WARNING", msg.channel,
+                        "Should not send RAID_WARNING when not in a raid")
+                end
+            end)
+
+            it("includes bid timer duration from config", function()
+                SimpleEPGP.db.profile.announce_loot_rw = true
+                SimpleEPGP.db.profile.bid_timer = 45
+                _G.IsInRaid = function() return true end
+
+                local link = _G._testItemDB[29759][2]
+                LootMaster:StartSession(link, 1000)
+
+                local found = false
+                for _, msg in ipairs(_G._testChatMessages) do
+                    if msg.channel == "RAID_WARNING" then
+                        found = true
+                        assert.is_truthy(msg.text:find("45s to bid"))
+                        break
+                    end
+                end
+                assert.is_true(found, "Expected RAID_WARNING with 45s timer")
+
+                SimpleEPGP.db.profile.bid_timer = 30  -- reset
+            end)
+        end)
+
+        describe("AwardItem RAID announcement", function()
+            it("sends RAID announcement when announce_awards_raid is true and in raid", function()
+                SimpleEPGP.db.profile.announce_awards_raid = true
+                _G.IsInRaid = function() return true end
+
+                local link = _G._testItemDB[29759][2]
+                local sessionId = LootMaster:StartSession(link, 1000)
+                LootMaster:OnBidReceived("Player2", sessionId, "MS")
+
+                -- Clear chat messages from StartSession
+                for i = #_G._testChatMessages, 1, -1 do
+                    _G._testChatMessages[i] = nil
+                end
+
+                LootMaster:AwardItem(sessionId, "Player2", "MS")
+
+                -- Find a RAID message
+                local found = false
+                for _, msg in ipairs(_G._testChatMessages) do
+                    if msg.channel == "RAID" then
+                        found = true
+                        assert.is_truthy(msg.text:find("Player2"))
+                        assert.is_truthy(msg.text:find("MS"))
+                        assert.is_truthy(msg.text:find("1000 GP"))
+                        break
+                    end
+                end
+                assert.is_true(found, "Expected RAID chat message for award")
+            end)
+
+            it("does NOT send RAID announcement when announce_awards_raid is false", function()
+                SimpleEPGP.db.profile.announce_awards_raid = false
+                _G.IsInRaid = function() return true end
+
+                local link = _G._testItemDB[29759][2]
+                local sessionId = LootMaster:StartSession(link, 1000)
+                LootMaster:OnBidReceived("Player2", sessionId, "MS")
+
+                -- Clear chat messages from StartSession
+                for i = #_G._testChatMessages, 1, -1 do
+                    _G._testChatMessages[i] = nil
+                end
+
+                LootMaster:AwardItem(sessionId, "Player2", "MS")
+
+                for _, msg in ipairs(_G._testChatMessages) do
+                    assert.are_not.equal("RAID", msg.channel,
+                        "Should not send RAID announcement when announce_awards_raid is false")
+                end
+            end)
+
+            it("does NOT send RAID announcement when not in a raid", function()
+                SimpleEPGP.db.profile.announce_awards_raid = true
+                _G.IsInRaid = function() return false end
+
+                local link = _G._testItemDB[29759][2]
+                local sessionId = LootMaster:StartSession(link, 1000)
+                LootMaster:OnBidReceived("Player2", sessionId, "MS")
+
+                -- Clear chat messages from StartSession
+                for i = #_G._testChatMessages, 1, -1 do
+                    _G._testChatMessages[i] = nil
+                end
+
+                LootMaster:AwardItem(sessionId, "Player2", "MS")
+
+                for _, msg in ipairs(_G._testChatMessages) do
+                    assert.are_not.equal("RAID", msg.channel,
+                        "Should not send RAID announcement when not in a raid")
+                end
+            end)
+
+            it("includes correct bid type and GP in RAID announcement for OS", function()
+                SimpleEPGP.db.profile.announce_awards_raid = true
+                _G.IsInRaid = function() return true end
+
+                local link = _G._testItemDB[29759][2]
+                local sessionId = LootMaster:StartSession(link, 1000)
+                LootMaster:OnBidReceived("Player2", sessionId, "OS")
+
+                -- Clear chat messages from StartSession
+                for i = #_G._testChatMessages, 1, -1 do
+                    _G._testChatMessages[i] = nil
+                end
+
+                LootMaster:AwardItem(sessionId, "Player2", "OS")
+
+                local found = false
+                for _, msg in ipairs(_G._testChatMessages) do
+                    if msg.channel == "RAID" then
+                        found = true
+                        assert.is_truthy(msg.text:find("Player2"))
+                        assert.is_truthy(msg.text:find("OS"))
+                        assert.is_truthy(msg.text:find("500 GP"))
+                        break
+                    end
+                end
+                assert.is_true(found, "Expected RAID announcement with OS bid type and 500 GP")
+            end)
+
+            it("includes correct GP=0 for DE in RAID announcement", function()
+                SimpleEPGP.db.profile.announce_awards_raid = true
+                _G.IsInRaid = function() return true end
+
+                local link = _G._testItemDB[29759][2]
+                local sessionId = LootMaster:StartSession(link, 1000)
+                LootMaster:OnBidReceived("Player2", sessionId, "DE")
+
+                -- Clear chat messages from StartSession
+                for i = #_G._testChatMessages, 1, -1 do
+                    _G._testChatMessages[i] = nil
+                end
+
+                LootMaster:AwardItem(sessionId, "Player2", "DE")
+
+                local found = false
+                for _, msg in ipairs(_G._testChatMessages) do
+                    if msg.channel == "RAID" then
+                        found = true
+                        assert.is_truthy(msg.text:find("Player2"))
+                        assert.is_truthy(msg.text:find("DE"))
+                        assert.is_truthy(msg.text:find("0 GP"))
+                        break
+                    end
+                end
+                assert.is_true(found, "Expected RAID announcement with DE bid type and 0 GP")
+            end)
         end)
     end)
 end)
